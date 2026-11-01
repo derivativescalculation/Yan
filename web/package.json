@@ -7,8 +7,8 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
-    "sync-deployments": "node -e "require('fs').cpSync('../contracts/deployments','src/deployments',{recursive:true})"",
-    "start": "bun server.ts"
+    "start": "bun server.ts",
+    "sync-deployments": "cp -r ../contracts/deployments/. src/deployments/"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.59.0",
