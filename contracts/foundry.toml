@@ -1,0 +1,24 @@
+[profile.default]
+src = "src"
+out = "out"
+libs = ["lib"]
+solc_version = "0.8.28"
+evm_version = "cancun"
+optimizer = true
+optimizer_runs = 2000
+remappings = [
+  "@openzeppelin/=lib/openzeppelin-contracts/",
+  "forge-std/=lib/forge-std/src/",
+]
+fs_permissions = [{ access = "read-write", path = "./deployments" }]
+
+[rpc_endpoints]
+bsc = "https://bsc-rpc.publicnode.com"
+bsc_testnet = "https://bsc-testnet-rpc.publicnode.com"
+
+[etherscan]
+bsc = { key = "${BSCSCAN_API_KEY}", chain = 56 }
+bsc_testnet = { key = "${BSCSCAN_API_KEY}", chain = 97 }
+
+[fuzz]
+runs = 256

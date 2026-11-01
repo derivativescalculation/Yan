@@ -1,0 +1,17 @@
+node_modules/
+dist/
+out/
+cache/
+broadcast/
+.env
+.env.*
+!.env.example
+*.sqlite
+*.log
+
+# local chain artifacts
+contracts/deployments/31337.json
+contracts/cache/
+*.tsbuildinfo
+.DS_Store
+Thumbs.db
