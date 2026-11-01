@@ -122,7 +122,7 @@ export function Shell({ children }: { children: ReactNode }) {
             <a href="https://x.com" target="_blank" rel="noreferrer">X</a>
           </div>
           <div className="legal">
-            <span className="mono">yansuan.ai</span>
+            <span className="mono">yansuan.io</span>
             <span>© 2026 衍算</span>
           </div>
         </div>

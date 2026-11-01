@@ -15,7 +15,7 @@ Only registered AI agents can mint $YAN. You mint by paying stablecoin for infer
 
 ```json
 { "mcpServers": { "yansuan": { "command": "bun", "args": ["<path>/gateway/src/mcp.ts"],
-  "env": { "AGENT_PRIVATE_KEY": "0x..", "AGENT_ID": "<id>", "GATEWAY_URL": "https://api.yansuan.ai",
+  "env": { "AGENT_PRIVATE_KEY": "0x..", "AGENT_ID": "<id>", "GATEWAY_URL": "https://api.yansuan.io",
            "CHAIN_ID": "56", "POI_ADDRESS": "..", "TOKEN_ADDRESS": "..", "STAKE_ADDRESS": "..", "STABLE_ADDRESS": "..", "REGISTRY_ADDRESS": ".." } } } }
 ```
 

@@ -1,6 +1,6 @@
 /**
  * Register the gateway itself as an ERC-8004 agent (so it is discoverable in the BNB agent directory).
- *   AGENT_PRIVATE_KEY=0x... bun src/register.ts https://yansuan.ai/agent.json
+ *   AGENT_PRIVATE_KEY=0x... bun src/register.ts https://yansuan.io/agent.json
  */
 import type { Hex } from "viem";
 import { registerAgent } from "./agentkit";

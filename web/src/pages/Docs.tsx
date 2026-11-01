@@ -5,7 +5,7 @@ import { SecHead } from "../components/Bits";
 export default function Docs() {
   const { t, lang } = useT();
   const d = deployment!;
-  const gw = GATEWAY || "https://api.yansuan.ai";
+  const gw = GATEWAY || "https://api.yansuan.io";
   const zh = lang === "zh";
   return (
     <div className="wrap doc">
