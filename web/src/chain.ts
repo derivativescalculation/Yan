@@ -19,7 +19,7 @@ export interface Deployment {
   opsTreasury: Address;
 }
 
-const files = import.meta.glob("../../contracts/deployments/*.json", { eager: true, import: "default" }) as Record<
+const files = import.meta.glob("./deployments/*.json", { eager: true, import: "default" }) as Record<
   string,
   Deployment
 >;
