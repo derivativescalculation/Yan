@@ -114,7 +114,7 @@ export function Shell({ children }: { children: ReactNode }) {
           <div>
             <h4>{t("foot_build")}</h4>
             <Link to="/docs">{t("nav_docs")}</Link>
-            <a href="https://github.com" target="_blank" rel="noreferrer">GitHub</a>
+            <a href="https://github.com/derivativescalculation/Yan" target="_blank" rel="noreferrer">GitHub</a>
             <a href="https://bnbchain.org/en/bnb-agent-studio" target="_blank" rel="noreferrer">BNB Agent Studio</a>
           </div>
           <div>
