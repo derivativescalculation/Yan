@@ -42,7 +42,8 @@ async function tick() {
   const stats = await (await fetch(`${gateway}/v1/stats`)).json();
   const r = await infer(gateway, pk, agentId, {
     model: "claude-haiku-5-5",
-    max_tokens: 300,
+    max_tokens: 400,
+    output_config: { effort: "low" },
     system: "你是衍算协议的创世矿工。用一句话、不超过60字、不用感叹号，陈述当前协议状态。只输出那句话。",
     messages: [{ role: "user", content: `协议统计 JSON：${JSON.stringify(stats)}` }],
   });
