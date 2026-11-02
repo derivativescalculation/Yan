@@ -60,6 +60,26 @@ export const minedEvent = parseAbiItem(
 );
 export const burnedEvent = parseAbiItem("event Burned(uint256 weiIn, uint256 tokensBurned)");
 
+
+/** eth_getLogs over [from, head] in adaptive windows (providers cap the range). */
+async function scanLogs<T>(pc: any, from: bigint, head: bigint, fetchWindow: (a: bigint, b: bigint) => Promise<T[]>): Promise<T[]> {
+  const out: T[] = [];
+  let step = 5_000n;
+  let f = from;
+  while (f <= head) {
+    const to = f + step - 1n > head ? head : f + step - 1n;
+    try {
+      out.push(...(await fetchWindow(f, to)));
+      f = to + 1n;
+      if (step < 5_000n) step *= 2n;
+    } catch (e) {
+      if (step <= 250n) throw e;
+      step /= 2n;
+    }
+  }
+  return out;
+}
+
 export interface Mined {
   agentId: bigint;
   miner: `0x${string}`;
@@ -129,10 +149,8 @@ export function useMinedLogs(window = 40_000n, enabled = true) {
     queryFn: async (): Promise<Mined[]> => {
       const head = await pc!.getBlockNumber();
       const from = head > window ? head - window : 0n;
-      const step = 5_000n;
-      const out: Mined[] = [];
-      for (let f = from; f <= head; f += step + 1n) {
-        const to = f + step > head ? head : f + step;
+      return scanLogs<Mined>(pc, from, head, async (f, to) => {
+        const out: Mined[] = [];
         const logs = await pc!.getLogs({ address: d.proofOfInference, event: minedEvent, fromBlock: f, toBlock: to });
         for (const l of logs)
           out.push({
@@ -144,8 +162,8 @@ export function useMinedLogs(window = 40_000n, enabled = true) {
             block: l.blockNumber!,
             tx: l.transactionHash!,
           });
-      }
-      return out;
+        return out;
+      });
     },
   });
 }
@@ -160,8 +178,10 @@ export function useBurnLogs(window = 40_000n) {
     queryFn: async () => {
       const head = await pc!.getBlockNumber();
       const from = head > window ? head - window : 0n;
-      const logs = await pc!.getLogs({ address: d.burner, event: burnedEvent, fromBlock: from, toBlock: head });
-      return logs.map((l) => ({ weiIn: l.args.weiIn!, tokens: l.args.tokensBurned!, block: l.blockNumber!, tx: l.transactionHash! }));
+      return scanLogs(pc, from, head, async (f, to) => {
+        const logs = await pc!.getLogs({ address: d.burner, event: burnedEvent, fromBlock: f, toBlock: to });
+        return logs.map((l) => ({ weiIn: l.args.weiIn!, tokens: l.args.tokensBurned!, block: l.blockNumber!, tx: l.transactionHash! }));
+      });
     },
   });
 }

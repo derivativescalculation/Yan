@@ -9,6 +9,8 @@ export const chain =
   env.CHAIN_ID === 56 ? bsc : env.CHAIN_ID === 97 ? bscTestnet : { ...foundry, id: env.CHAIN_ID, rpcUrls: { default: { http: [env.RPC_URL] } } };
 
 export const client = createPublicClient({ chain, transport: http(env.RPC_URL) });
+/** log scans go to an endpoint that serves eth_getLogs */
+export const logsClient = createPublicClient({ chain, transport: http(env.LOGS_RPC_URL ?? env.RPC_URL) });
 
 export const POI = env.POI_ADDRESS as Address;
 export const TOKEN = env.TOKEN_ADDRESS as Address;
@@ -140,19 +142,31 @@ export function minedEvents(): Promise<MinedEvent[]> {
   if (scanning) return scanning;
   scanning = (async () => {
     try {
-      const head = await client.getBlockNumber();
+      const head = await logsClient.getBlockNumber();
       if (head <= minedCache.upTo) return minedCache.events;
-      const step = 5_000n; // public RPC log window
-      const fresh: MinedEvent[] = [];
-      for (let from = minedCache.upTo + 1n; from <= head; from += step + 1n) {
-        const to = from + step > head ? head : from + step;
-        const logs = await client.getLogs({ address: POI, event: minedAbi, fromBlock: from, toBlock: to });
+      // adaptive window: start wide, halve on a provider rejection, grow back after successes
+      let step = 5_000n;
+      let from = minedCache.upTo + 1n;
+      while (from <= head) {
+        const to = from + step - 1n > head ? head : from + step - 1n;
+        let logs;
+        try {
+          logs = await logsClient.getLogs({ address: POI, event: minedAbi, fromBlock: from, toBlock: to });
+        } catch (e) {
+          if (step <= 100n) throw e;
+          step /= 2n;
+          continue;
+        }
+        const fresh: MinedEvent[] = [];
         for (const l of logs) {
           const a = l.args;
           fresh.push({ agentId: a.agentId!, miner: a.miner!, usd: a.usdAmount18!, tokens: a.tokensMinted!, epochAfter: a.epochAfter!, weiPaid: a.weiPaid!, block: l.blockNumber!, tx: l.transactionHash! });
         }
+        // commit progress per window so a later failure never rescans or double-counts
+        minedCache = { upTo: to, events: [...minedCache.events, ...fresh] };
+        from = to + 1n;
+        if (step < 5_000n) step *= 2n;
       }
-      minedCache = { upTo: head, events: [...minedCache.events, ...fresh] };
       return minedCache.events;
     } finally {
       scanning = null;

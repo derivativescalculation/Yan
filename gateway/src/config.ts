@@ -7,6 +7,8 @@ const Env = z
     PORT: z.coerce.number().default(8787),
     CHAIN_ID: z.coerce.number().default(97),
     RPC_URL: z.string().default("https://bsc-testnet-rpc.publicnode.com"),
+    /// RPC used for eth_getLogs scans (the official BNB dataseed endpoints refuse log queries)
+    LOGS_RPC_URL: z.string().optional(),
     POI_ADDRESS: addr,
     TOKEN_ADDRESS: addr,
     STAKE_ADDRESS: addr,
