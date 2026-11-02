@@ -135,6 +135,21 @@ forge script script/Deploy.s.sol --rpc-url bsc_testnet --broadcast --skip-simula
 
 The script precomputes the minter address, deploys token → burner → minter → stake, and aborts before broadcasting anything if the prediction does not match. On mainnet it refuses to run without `OPS_TREASURY` set to a non-deployer address and `STABLE` set. Addresses are written to `contracts/deployments/<chainId>.json`, which the web app imports directly.
 
+## Deployments
+
+| | BNB Chain mainnet (56) | BSC testnet (97) |
+|---|---|---|
+| YAN token | `0xa19cB6ef09E3a5fDc36230afd25e1044078100Fd` | `0x23cE94fA1fAD79Ec09E2cc485b1c160C2C4E73f9` |
+| ProofOfInference | `0x073648Dd60402E39C332B49d76728EAE2820d2d8` | `0x5Fc10eBDfA80E218c3bB998c62F525796F177551` |
+| BuybackBurner | `0x23cE94fA1fAD79Ec09E2cc485b1c160C2C4E73f9` | `0x073648Dd60402E39C332B49d76728EAE2820d2d8` |
+| SuanStake | `0x5Fc10eBDfA80E218c3bB998c62F525796F177551` | `0xaBD3774CD5218516953c4Ab276890948aDc52688` |
+| Settlement stablecoin | USD1 `0x8d0D000Ee44948FC98c9B98A4FA4921476f08B0d` | MockUSD `0xa19cB6ef09E3a5fDc36230afd25e1044078100Fd` |
+| Ops treasury | `0x16F7e765DC66D5589bc60e8005949921E066A65E` | deployer |
+| Gateway ERC-8004 agent | #401787 | #2705 |
+| Deploy block | 131213494 | 140262704 |
+
+All contracts are verified on BscScan and Sourcify. Gateway: `https://api.yansuan.io`. Site: `https://yansuan.io`.
+
 Known addresses:
 
 | | Mainnet (56) | Testnet (97) |
