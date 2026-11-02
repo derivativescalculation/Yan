@@ -8,9 +8,14 @@
         "internalType": "address"
       },
       {
-        "name": "stable_",
+        "name": "priceFeed_",
         "type": "address",
         "internalType": "address"
+      },
+      {
+        "name": "maxPriceAge_",
+        "type": "uint256",
+        "internalType": "uint256"
       },
       {
         "name": "registry_",
@@ -121,6 +126,19 @@
   },
   {
     "type": "function",
+    "name": "bnbUsd",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
     "name": "burnBps",
     "inputs": [],
     "outputs": [
@@ -152,6 +170,19 @@
     "outputs": [
       {
         "name": "usd18",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "costToCapWei",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
         "type": "uint256",
         "internalType": "uint256"
       }
@@ -205,6 +236,19 @@
   },
   {
     "type": "function",
+    "name": "feedScale",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
     "name": "initialTokensPerUsd",
     "inputs": [],
     "outputs": [
@@ -242,6 +286,19 @@
   },
   {
     "type": "function",
+    "name": "maxPriceAge",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
     "name": "minPaymentUsd",
     "inputs": [],
     "outputs": [
@@ -261,11 +318,6 @@
         "name": "agentId",
         "type": "uint256",
         "internalType": "uint256"
-      },
-      {
-        "name": "usdAmount",
-        "type": "uint256",
-        "internalType": "uint256"
       }
     ],
     "outputs": [
@@ -275,7 +327,7 @@
         "internalType": "uint256"
       }
     ],
-    "stateMutability": "nonpayable"
+    "stateMutability": "payable"
   },
   {
     "type": "function",
@@ -357,10 +409,23 @@
   },
   {
     "type": "function",
+    "name": "priceFeed",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "contract IAggregatorV3"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
     "name": "quote",
     "inputs": [
       {
-        "name": "usdAmount",
+        "name": "weiAmount",
         "type": "uint256",
         "internalType": "uint256"
       }
@@ -387,6 +452,25 @@
     "outputs": [
       {
         "name": "usd18",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "quoteUsd",
+    "inputs": [
+      {
+        "name": "usd18",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "tokens",
         "type": "uint256",
         "internalType": "uint256"
       }
@@ -509,32 +593,6 @@
   },
   {
     "type": "function",
-    "name": "stable",
-    "inputs": [],
-    "outputs": [
-      {
-        "name": "",
-        "type": "address",
-        "internalType": "contract IERC20"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "stableScale",
-    "inputs": [],
-    "outputs": [
-      {
-        "name": "",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
     "name": "token",
     "inputs": [],
     "outputs": [
@@ -600,6 +658,19 @@
   },
   {
     "type": "function",
+    "name": "totalWeiPaid",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
     "name": "transferOwnership",
     "inputs": [
       {
@@ -617,6 +688,25 @@
     "inputs": [],
     "outputs": [],
     "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "usdOf",
+    "inputs": [
+      {
+        "name": "weiAmount",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
   },
   {
     "type": "event",
@@ -648,6 +738,12 @@
       },
       {
         "name": "epochAfter",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "weiPaid",
         "type": "uint256",
         "indexed": false,
         "internalType": "uint256"
@@ -757,7 +853,12 @@
   },
   {
     "type": "error",
-    "name": "BadDecimals",
+    "name": "BadPrice",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "BadRate",
     "inputs": []
   },
   {
@@ -825,14 +926,13 @@
   },
   {
     "type": "error",
-    "name": "SafeERC20FailedOperation",
-    "inputs": [
-      {
-        "name": "token",
-        "type": "address",
-        "internalType": "address"
-      }
-    ]
+    "name": "StalePrice",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "TransferFailed",
+    "inputs": []
   },
   {
     "type": "error",

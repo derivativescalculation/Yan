@@ -1,36 +1,37 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.28;
 
-import {IERC20Metadata} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
-import {SafeERC20, IERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {Ownable2Step, Ownable} from "@openzeppelin/contracts/access/Ownable2Step.sol";
 import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import {SuanToken} from "./SuanToken.sol";
 import {IERC8004Identity} from "./interfaces/IERC8004Identity.sol";
+import {IAggregatorV3} from "./interfaces/IAggregatorV3.sol";
 
 /// @title ProofOfInference - the only mint path for the token
-/// @notice An ERC-8004 registered agent pays stablecoin for inference credit at the gateway.
-///         The payment mints tokens to the agent at the current epoch rate. Humans cannot call this
-///         unless they own or operate a registered agent. Every EPOCH_SIZE tokens the mint rate is
-///         multiplied by decayBps/10000 (e.g. 7000 = each epoch mints 30% fewer tokens per USD).
-///         Stablecoin is split: burnBps -> BuybackBurner, remainder -> ops treasury (pays model bills).
+/// @notice An ERC-8004 registered agent pays BNB for inference credit. The payment is valued in USD
+///         with the Chainlink BNB/USD feed, mints tokens to the caller at the current epoch rate and
+///         books the USD value as credit on the agentId. Only the identity's owner or its registered
+///         agent wallet can call. Every EPOCH_SIZE tokens the mint rate is multiplied by
+///         decayBps/10000 (7000 = each epoch mints 30% fewer tokens per USD).
 ///
-///         Utility: tokens are always redeemable for inference credit (`redeem`). Redemption burns
-///         the tokens and credits USD at the *genesis* (epoch 0) rate times redeemBps. The rate is
-///         constant so the protocol's redemption liability is bounded by redeemBps of all mining revenue.
+///         BNB is split in the same transaction: burnBps to the BuybackBurner, the rest to the ops
+///         treasury (which pays model bills).
 ///
-///         The owner can only pause `mine`. Rates, split and destinations are immutable.
+///         Utility: tokens are always redeemable for inference credit (`redeem`) at the genesis rate
+///         times redeemBps, constant across epochs, so the redemption liability is bounded by
+///         redeemBps of all payments.
+///
+///         The owner can only pause `mine`. Rates, split, feed and destinations are immutable.
 contract ProofOfInference is Ownable2Step, Pausable, ReentrancyGuard {
-    using SafeERC20 for IERC20;
-
     uint256 public constant EPOCH_SIZE = 100_000_000e18; // rate steps down every 100M tokens
     uint256 public constant MAX_EPOCH = 9; // 10 epochs x 100M = 1B cap
     uint256 public constant BPS = 10_000;
 
     SuanToken public immutable token;
-    IERC20 public immutable stable;
-    uint256 public immutable stableScale; // 10 ** (18 - stableDecimals)
+    IAggregatorV3 public immutable priceFeed;
+    uint256 public immutable feedScale; // 10 ** feed decimals
+    uint256 public immutable maxPriceAge; // seconds
     IERC8004Identity public immutable registry;
     address public immutable opsTreasury;
     address public immutable burner;
@@ -50,13 +51,19 @@ contract ProofOfInference is Ownable2Step, Pausable, ReentrancyGuard {
     mapping(uint256 agentId => uint256 amount) public minedByAgent;
     mapping(uint256 agentId => uint256 amount) public redeemedByAgent;
     uint256 public totalUsdPaid;
+    uint256 public totalWeiPaid;
     uint256 public totalMinted;
     uint256 public totalRedeemed;
     uint256 public agentCount;
     mapping(uint256 agentId => bool) public seen;
 
     event Mined(
-        uint256 indexed agentId, address indexed miner, uint256 usdAmount18, uint256 tokensMinted, uint256 epochAfter
+        uint256 indexed agentId,
+        address indexed miner,
+        uint256 usdAmount18,
+        uint256 tokensMinted,
+        uint256 epochAfter,
+        uint256 weiPaid
     );
     event Redeemed(uint256 indexed agentId, address indexed redeemer, uint256 tokensBurned, uint256 creditUsd18);
 
@@ -65,13 +72,16 @@ contract ProofOfInference is Ownable2Step, Pausable, ReentrancyGuard {
     error CapReached();
     error ZeroAddress();
     error BadBps();
-    error BadDecimals();
     error BadRate();
+    error BadPrice();
+    error StalePrice();
     error ZeroAmount();
+    error TransferFailed();
 
     constructor(
         address token_,
-        address stable_,
+        address priceFeed_,
+        uint256 maxPriceAge_,
         address registry_,
         address opsTreasury_,
         address burner_,
@@ -83,16 +93,16 @@ contract ProofOfInference is Ownable2Step, Pausable, ReentrancyGuard {
         address owner_
     ) Ownable(owner_) {
         if (
-            token_ == address(0) || stable_ == address(0) || registry_ == address(0) || opsTreasury_ == address(0)
+            token_ == address(0) || priceFeed_ == address(0) || registry_ == address(0) || opsTreasury_ == address(0)
                 || burner_ == address(0)
         ) revert ZeroAddress();
         if (burnBps_ >= BPS || redeemBps_ > BPS || decayBps_ == 0 || decayBps_ >= BPS) revert BadBps();
-        if (initialTokensPerUsd_ == 0 || minPaymentUsd_ == 0) revert BadRate();
-        uint8 dec = IERC20Metadata(stable_).decimals();
-        if (dec > 18) revert BadDecimals();
+        if (initialTokensPerUsd_ == 0 || minPaymentUsd_ == 0 || maxPriceAge_ == 0) revert BadRate();
+        uint8 dec = IAggregatorV3(priceFeed_).decimals();
         token = SuanToken(token_);
-        stable = IERC20(stable_);
-        stableScale = 10 ** (18 - dec);
+        priceFeed = IAggregatorV3(priceFeed_);
+        feedScale = 10 ** dec;
+        maxPriceAge = maxPriceAge_;
         registry = IERC8004Identity(registry_);
         opsTreasury = opsTreasury_;
         burner = burner_;
@@ -101,6 +111,21 @@ contract ProofOfInference is Ownable2Step, Pausable, ReentrancyGuard {
         decayBps = decayBps_;
         minPaymentUsd = minPaymentUsd_;
         redeemBps = redeemBps_;
+    }
+
+    // ---------------------------------------------------------------- price
+
+    /// @notice USD (1e18) per 1 BNB from the Chainlink feed. Reverts on a non-positive or stale answer.
+    function bnbUsd() public view returns (uint256) {
+        (, int256 answer,, uint256 updatedAt,) = priceFeed.latestRoundData();
+        if (answer <= 0 || updatedAt == 0) revert BadPrice();
+        if (updatedAt + maxPriceAge < block.timestamp) revert StalePrice();
+        return uint256(answer) * 1e18 / feedScale;
+    }
+
+    /// @notice USD value (1e18) of `weiAmount` at the current feed price
+    function usdOf(uint256 weiAmount) public view returns (uint256) {
+        return weiAmount * bnbUsd() / 1e18;
     }
 
     // ---------------------------------------------------------------- views
@@ -122,7 +147,7 @@ contract ProofOfInference is Ownable2Step, Pausable, ReentrancyGuard {
     }
 
     /// @notice USD (1e18) needed to mint every remaining token, across all epochs
-    function costToCap() external view returns (uint256 usd18) {
+    function costToCap() public view returns (uint256 usd18) {
         uint256 minted = totalMinted;
         for (uint256 e = minted / EPOCH_SIZE; e <= MAX_EPOCH; e++) {
             uint256 room = (e + 1) * EPOCH_SIZE - minted;
@@ -132,10 +157,20 @@ contract ProofOfInference is Ownable2Step, Pausable, ReentrancyGuard {
         }
     }
 
-    /// @notice Tokens that `usdAmount` (in the stablecoin's own units) would mint right now,
-    ///         walking across halving boundaries.
-    function quote(uint256 usdAmount) external view returns (uint256 tokens) {
-        (tokens,) = _emission(usdAmount * stableScale, totalMinted);
+    /// @notice wei needed to mint every remaining token at the current feed price (rounded up)
+    function costToCapWei() external view returns (uint256) {
+        uint256 p = bnbUsd();
+        return (costToCap() * 1e18 + p - 1) / p;
+    }
+
+    /// @notice tokens that paying `weiAmount` would mint right now, walking across epoch boundaries
+    function quote(uint256 weiAmount) external view returns (uint256 tokens) {
+        (tokens,) = _emission(usdOf(weiAmount), totalMinted);
+    }
+
+    /// @notice tokens that `usd18` of payment would mint right now
+    function quoteUsd(uint256 usd18) external view returns (uint256 tokens) {
+        (tokens,) = _emission(usd18, totalMinted);
     }
 
     /// @notice USD credit (1e18) that burning `tokens` grants. Constant: genesis rate x redeemBps.
@@ -149,31 +184,32 @@ contract ProofOfInference is Ownable2Step, Pausable, ReentrancyGuard {
 
     // ---------------------------------------------------------------- mining
 
-    /// @notice Pay `usdAmount` stablecoin (caller must have approved) on behalf of `agentId`.
-    ///         Caller must be the agent's owner or its registered wallet. Mints tokens to caller.
-    function mine(uint256 agentId, uint256 usdAmount) external whenNotPaused nonReentrant returns (uint256 minted) {
+    /// @notice Pay BNB for inference credit on `agentId`. Caller must be the agent's owner or its
+    ///         registered wallet. Mints tokens to the caller.
+    function mine(uint256 agentId) external payable whenNotPaused nonReentrant returns (uint256 minted) {
         if (!isOperator(agentId, msg.sender)) revert NotAgentOperator(agentId, msg.sender);
-        uint256 usd18 = usdAmount * stableScale;
+        uint256 usd18 = usdOf(msg.value);
         if (usd18 < minPaymentUsd) revert BelowMinimum();
 
         uint256 epochAfter;
         (minted, epochAfter) = _emission(usd18, totalMinted);
         if (minted == 0) revert CapReached();
 
-        // pull + split
-        uint256 toBurn = usdAmount * burnBps / BPS;
-        if (toBurn > 0) stable.safeTransferFrom(msg.sender, burner, toBurn);
-        stable.safeTransferFrom(msg.sender, opsTreasury, usdAmount - toBurn);
-
-        // account
+        // account before external calls
         creditsUsd[agentId] += usd18;
         minedByAgent[agentId] += minted;
         totalUsdPaid += usd18;
+        totalWeiPaid += msg.value;
         totalMinted += minted;
         _touch(agentId);
 
         token.mint(msg.sender, minted);
-        emit Mined(agentId, msg.sender, usd18, minted, epochAfter);
+
+        uint256 toBurn = msg.value * burnBps / BPS;
+        _send(burner, toBurn);
+        _send(opsTreasury, msg.value - toBurn);
+
+        emit Mined(agentId, msg.sender, usd18, minted, epochAfter, msg.value);
     }
 
     /// @notice Burn tokens for inference credit on `agentId`. Caller must operate the agent.
@@ -205,6 +241,12 @@ contract ProofOfInference is Ownable2Step, Pausable, ReentrancyGuard {
     }
 
     // ---------------------------------------------------------------- internals
+
+    function _send(address to, uint256 amount) internal {
+        if (amount == 0) return;
+        (bool ok,) = to.call{value: amount}("");
+        if (!ok) revert TransferFailed();
+    }
 
     function _touch(uint256 agentId) internal {
         if (!seen[agentId]) {

@@ -31,13 +31,13 @@ server.tool("yansuan_status", "Protocol stats: epoch, tokens per USD, total mine
   return text(await r.json());
 });
 
-server.tool("yansuan_quote", "How many tokens a USD payment would mint right now.", { usd: z.string() }, async ({ usd }) => text(await quote(usd)));
+server.tool("yansuan_quote", "How many YAN a BNB payment would mint right now, and its USD value.", { bnb: z.string().describe("amount in BNB, e.g. '0.01'") }, async ({ bnb }) => text(await quote(bnb)));
 
 server.tool(
   "yansuan_mine",
-  "Pay stablecoin on-chain for inference credit. Mints tokens to your wallet at the current epoch rate. Requires ERC-8004 agent you operate.",
-  { usd: z.string().describe("amount in USD, e.g. '5'") },
-  async ({ usd }) => text(await mine(pk(), agentId(), usd)),
+  "Pay BNB on-chain for inference credit (valued in USD by Chainlink). Mints YAN to your wallet at the current epoch rate. Requires an ERC-8004 agent you operate.",
+  { bnb: z.string().describe("amount in BNB, e.g. '0.01'") },
+  async ({ bnb }) => text(await mine(pk(), agentId(), bnb)),
 );
 
 server.tool("yansuan_redeem", "Burn tokens for inference credit at the genesis rate x redeemBps (constant, independent of epoch).", { tokens: z.string() }, async ({ tokens }) =>

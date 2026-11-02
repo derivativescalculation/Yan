@@ -3,7 +3,7 @@ pragma solidity ^0.8.28;
 
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
-/// @notice Fake Pancake router: takes path[0], pays out `rate` x amountIn of path[last] (which it must hold).
+/// @notice Fake Pancake router: pays out `rate` x msg.value of path[last] (which it must hold).
 contract MockRouter {
     address public immutable wbnbAddr;
     uint256 public rate = 2;
@@ -20,17 +20,15 @@ contract MockRouter {
         rate = r;
     }
 
-    function swapExactTokensForTokensSupportingFeeOnTransferTokens(
-        uint256 amountIn,
+    function swapExactETHForTokensSupportingFeeOnTransferTokens(
         uint256 amountOutMin,
         address[] calldata path,
         address to,
         uint256
-    ) external {
-        IERC20(path[0]).transferFrom(msg.sender, address(this), amountIn);
-        uint256 out = amountIn * rate;
+    ) external payable {
+        uint256 out = msg.value * rate;
         require(out >= amountOutMin, "slippage");
-        IERC20(path[path.length - 1]).transfer(to, out);
+        require(IERC20(path[path.length - 1]).transfer(to, out), "transfer");
     }
 
     function getAmountsOut(uint256 amountIn, address[] calldata path) external view returns (uint256[] memory a) {

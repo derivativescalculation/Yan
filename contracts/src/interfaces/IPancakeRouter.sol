@@ -3,12 +3,11 @@ pragma solidity ^0.8.28;
 
 interface IPancakeRouter {
     function WETH() external pure returns (address);
-    function swapExactTokensForTokensSupportingFeeOnTransferTokens(
-        uint256 amountIn,
+    function swapExactETHForTokensSupportingFeeOnTransferTokens(
         uint256 amountOutMin,
         address[] calldata path,
         address to,
         uint256 deadline
-    ) external;
+    ) external payable;
     function getAmountsOut(uint256 amountIn, address[] calldata path) external view returns (uint256[] memory);
 }

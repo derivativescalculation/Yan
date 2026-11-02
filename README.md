@@ -1,10 +1,10 @@
 # 衍算 Yansuan · Proof of Inference
 
-**A BNB Chain token that only AI agents can mint.** An agent with an ERC-8004 identity pays stablecoin for inference credit; the payment mints $YAN at the current epoch rate. There is no presale, no team allocation and no mint path that does not go through a registered agent paying for compute.
+**A BNB Chain token that only AI agents can mint.** An agent with an ERC-8004 identity pays BNB for inference credit; the payment mints $YAN at the current epoch rate. There is no presale, no team allocation and no mint path that does not go through a registered agent paying for compute.
 
 - **Chain:** BNB Smart Chain (mainnet 56, testnet 97)
 - **Identity:** ERC-8004 Identity Registry (`0x8004A169…a432` mainnet, `0x8004A818…BD9e` testnet)
-- **Settlement:** USD1 (18 decimals) on mainnet, mock stablecoin on testnet
+- **Payment:** native BNB, valued in USD by the Chainlink BNB/USD feed (one transaction, no approval)
 - **Supply:** 1,000,000,000 YAN hard cap, 10 epochs of 100M, mint rate steps down 30% per epoch
 - **Utility:** redeem for inference credit, stake for gateway tier, protocol buyback-and-burn
 
@@ -13,7 +13,7 @@
 ## How it works
 
 ```
-                 approve + mine(agentId, usd)                     signed request
+                 mine(agentId) + BNB                              signed request
   ┌──────────┐ ───────────────────────────────▶ ┌──────────────────┐ ◀──────────── ┌───────────┐
   │ ERC-8004 │                                  │ ProofOfInference │               │  Gateway  │
   │  agent   │ ◀─────────────────────────────── │   (sole minter)  │ ───credit───▶ │ (metered  │
@@ -27,7 +27,7 @@
 ```
 
 1. **Identity.** The agent registers once in the ERC-8004 Identity Registry and receives an `agentId`. The minter accepts calls only from that identity's owner or its registered agent wallet.
-2. **Mine.** `mine(agentId, amount)` pulls stablecoin, splits it 80% to the ops treasury and 20% to the burner, mints YAN to the caller at the current epoch rate and books `amount` as inference credit on the `agentId`.
+2. **Mine.** The agent calls `mine(agentId)` with BNB. The contract values it in USD with Chainlink (reverting on a stale or bad price), splits the BNB 80% to the ops treasury and 20% to the burner in the same transaction, mints YAN to the caller at the current epoch rate and books the USD value as inference credit on the `agentId`.
 3. **Infer.** The agent calls the gateway with a wallet signature. The gateway meters model usage against the on-chain credit and settles each request at list price plus markup.
 4. **Redeem / stake / burn.** YAN can be burned for inference credit at a fixed fraction of the genesis mint value (never pausable), staked per `agentId` for a better gateway tier, and is bought back and burned by the protocol from the 20% share.
 
@@ -79,8 +79,8 @@ web/         Vite + React + wagmi · protocol, mine, agents, treasury, integrati
 | Contract | Role |
 |---|---|
 | `SuanToken` | BEP-20, 1B cap, ERC20Permit. Minter is immutable and set at construction from a precomputed address. No owner, no admin functions. |
-| `ProofOfInference` | The only mint path. `mine`, `redeem`, `quote`, `quoteRedeem`, `rateAt`, `costToCap`. Epoch walk rounds in the protocol's favour. Owner can only pause `mine`. |
-| `BuybackBurner` | Receives the 20% share. Keeper swaps stable→YAN on PancakeSwap V2 (direct or via WBNB) and burns the output. `minOut` must be within 3% of the router quote; per-call cap. Stablecoin has no other exit. |
+| `ProofOfInference` | The only mint path. `mine` (payable), `redeem`, `quote` (wei), `quoteUsd`, `quoteRedeem`, `bnbUsd`, `rateAt`, `costToCap`, `costToCapWei`. Chainlink price must be positive and younger than `maxPriceAge`. Epoch walk rounds in the protocol's favour. Owner can only pause `mine`. |
+| `BuybackBurner` | Receives the 20% share in BNB. Keeper swaps WBNB→YAN on PancakeSwap V2 and burns the output. `minOut` must be within 3% of the router quote; per-call cap. BNB has no other exit. |
 | `SuanStake` | Per-`agentId` staking with a 7-day unstake cooldown. Read by the gateway to assign tiers. |
 
 ### Gateway
@@ -100,7 +100,7 @@ web/         Vite + React + wagmi · protocol, mine, agents, treasury, integrati
 ### Local chain, end to end
 
 ```sh
-# 1. chain + contracts (mock stablecoin, registry, router; registers agent #1 for the deployer)
+# 1. chain + contracts (mock price feed at $700, registry, router; registers agent #1 for the deployer)
 anvil
 cd contracts
 PRIVATE_KEY=<anvil key 0> forge script script/DeployLocal.s.sol \
@@ -124,7 +124,7 @@ cd contracts && forge test -vvv
 cd gateway && bun x tsc --noEmit
 cd web && bun x tsc --noEmit && bun x vite build
 
-# browser end-to-end against a local anvil chain (scripted wallet: connect, approve, mine, redeem, stake)
+# browser end-to-end against a local anvil chain: read-only site, agent mines from its own runtime, site reflects it
 cd web && bun run dev:anvil &   # needs .env.anvil with VITE_CHAIN_ID=31337 and src/deployments/31337.json
 cd web && SITE=http://127.0.0.1:5174 bun run e2e
 ```
@@ -133,24 +133,25 @@ cd web && SITE=http://127.0.0.1:5174 bun run e2e
 
 ```sh
 cd contracts
-cp .env.example .env          # PRIVATE_KEY, REGISTRY, ROUTER, STABLE (mainnet), OPS_TREASURY (mainnet, multisig)
+cp .env.example .env          # PRIVATE_KEY, PRICE_FEED, MAX_PRICE_AGE, REGISTRY, ROUTER, OPS_TREASURY
 forge script script/Deploy.s.sol --rpc-url bsc_testnet --broadcast --skip-simulation --verify
 ```
 
-The script precomputes the minter address, deploys token → burner → minter → stake, and aborts before broadcasting anything if the prediction does not match. On mainnet it refuses to run without `OPS_TREASURY` set to a non-deployer address and `STABLE` set. Addresses are written to `contracts/deployments/<chainId>.json`, which the web app imports directly.
+The script precomputes the minter address, deploys token → burner → minter → stake, and aborts before broadcasting anything if the prediction does not match. On mainnet it refuses to run with the deployer as `OPS_TREASURY`. Addresses are written to `contracts/deployments/<chainId>.json`, which the web app imports directly.
 
 ## Deployments
 
 | | BNB Chain mainnet (56) | BSC testnet (97) |
 |---|---|---|
-| YAN token | `0xa19cB6ef09E3a5fDc36230afd25e1044078100Fd` | `0x23cE94fA1fAD79Ec09E2cc485b1c160C2C4E73f9` |
-| ProofOfInference | `0x073648Dd60402E39C332B49d76728EAE2820d2d8` | `0x5Fc10eBDfA80E218c3bB998c62F525796F177551` |
-| BuybackBurner | `0x23cE94fA1fAD79Ec09E2cc485b1c160C2C4E73f9` | `0x073648Dd60402E39C332B49d76728EAE2820d2d8` |
-| SuanStake | `0x5Fc10eBDfA80E218c3bB998c62F525796F177551` | `0xaBD3774CD5218516953c4Ab276890948aDc52688` |
-| Settlement stablecoin | USD1 `0x8d0D000Ee44948FC98c9B98A4FA4921476f08B0d` | MockUSD `0xa19cB6ef09E3a5fDc36230afd25e1044078100Fd` |
+| YAN token | `0x460461dBa2643b62514ad199F0746ec080752e56` | `0xa408cF697B237aC034DF0908B5DC33437F07A03c` |
+| ProofOfInference | `0xbED42bc64FF8B69075626402b6fa6B3b3202C52c` | `0x3611B83353f9090d8466D75B73c165fDbf293DAD` |
+| BuybackBurner | `0xAC0CbcA517AFB8d8669f7B7479007c14FD602308` | `0x13CC9aA5744e68B4c9E9A3514DEb612527bdeC7f` |
+| SuanStake | `0x37F08A12cF58f340C572D3Ca426a181530Bf0549` | `0x7AE827a0a4254D1dA84129a624EA1D61F5D79353` |
+| Chainlink BNB/USD | `0x0567F2323251f0Aab15c8dFb1967E4e8A7D42aeE` | `0x2514895c72f50D8bd4B4F9b1110F0D6bD2c97526` |
+| Max price age | 3600 s | 86400 s |
 | Ops treasury | `0x16F7e765DC66D5589bc60e8005949921E066A65E` | deployer |
 | Gateway ERC-8004 agent | #401787 | #2705 |
-| Deploy block | 131213494 | 140262704 |
+| Deploy block | 131230337 | 140370097 |
 
 All contracts are verified on BscScan and Sourcify. Gateway: `https://api.yansuan.io`. Site: `https://yansuan.io`.
 
@@ -160,7 +161,6 @@ Known addresses:
 |---|---|---|
 | ERC-8004 Identity Registry | `0x8004A169FB4a3325136EB29fA0ceB6D2e539a432` | `0x8004A818BFB912233c491871b3d84c89A494BD9e` |
 | PancakeSwap V2 Router | `0x10ED43C718714eb63d5aA57B78B54704E256024E` | `0xD99D1c33F9fC3444f8101754aBC46c52416550D1` |
-| USD1 | `0x8d0D000Ee44948FC98c9B98A4FA4921476f08B0d` | deploy `MockUSD` |
 
 After deploying, register the gateway as an ERC-8004 agent so it is discoverable:
 
@@ -172,17 +172,19 @@ cd gateway && AGENT_PRIVATE_KEY=0x… bun src/register.ts https://<gateway-host>
 
 1. Deploy to testnet, verify, run the gateway against it with Postgres, run the genesis agent (`gateway/src/genesis.ts`) for 72 hours.
 2. Second independent review of `ProofOfInference._emission`, `costToCap` and `BuybackBurner`.
-3. Mainnet deploy with USD1 and a multisig `OPS_TREASURY`.
-4. Genesis agent mines in a 72-hour private window; the YAN/USD1 PancakeSwap pool is seeded from those tokens plus treasury USD1 and the LP is burned; public mining opens.
+3. Mainnet deploy with the Chainlink BNB/USD feed and a dedicated `OPS_TREASURY`.
+4. Optional: a YAN/WBNB PancakeSwap pool is seeded (by the treasury or any miner) and the LP burned. Until a pool exists the burner accumulates BNB.
 5. Publish the MCP server and `SKILL.md`; submit to BNB Chain ecosystem programs.
 
 ## Security model
 
 - Token: no owner, immutable minter, cap enforced on `totalSupply`.
-- Minter: immutable parameters and destinations; owner can only pause `mine`; `redeem` can never be paused; `nonReentrant` everywhere stablecoin or tokens move.
-- Burner: stablecoin can only leave through a swap whose entire output is burned; slippage floor and per-call cap are enforced on-chain; keeper is a role, not a trust assumption on price.
+- Minter: immutable parameters and destinations; owner can only pause `mine`; `redeem` can never be paused; `nonReentrant` everywhere BNB or tokens move; state is written before BNB is sent; a treasury that rejects BNB makes `mine` revert rather than strand funds.
+- Burner: BNB can only leave through a swap whose entire output is burned; slippage floor and per-call cap are enforced on-chain; keeper is a role, not a trust assumption on price.
 - Gateway: no API keys; wallet signatures bound to chain, agent, time, nonce and body; reservations before execution; mandatory persistent ledger; server-side tools refused; bounded caches and IP limits.
-- Not yet supported: ERC-1271 smart-account signers at the gateway; fee-on-transfer stablecoins.
+- Price: Chainlink BNB/USD with a staleness bound (mainnet feed updates about every 30 seconds). A stale or non-positive answer reverts `mine`; it never mints at a bad price.
+- Ledger: usage rows are scoped by chain id, so one database can serve testnet and mainnet gateways.
+- Not yet supported: ERC-1271 smart-account signers at the gateway.
 
 ## License
 

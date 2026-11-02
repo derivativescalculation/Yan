@@ -2,9 +2,9 @@
  * Client-side helpers an agent uses to mine, redeem and call the gateway.
  * Used by the MCP server and by the register script. Needs AGENT_PRIVATE_KEY.
  */
-import { createWalletClient, http, formatUnits, parseUnits, type Address, type Hex } from "viem";
+import { createWalletClient, http, formatEther, formatUnits, parseEther, parseUnits, type Address, type Hex } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
-import { chain, client, POI, TOKEN, STABLE, STAKE, REGISTRY, poiAbi, tokenAbi, stakeAbi, erc20Abi, registryAbi } from "./chain";
+import { chain, client, POI, TOKEN, STAKE, REGISTRY, poiAbi, tokenAbi, stakeAbi, erc20Abi, registryAbi } from "./chain";
 import { authMessage, sha256Hex, randomNonce } from "./auth";
 import { env } from "./config";
 
@@ -13,19 +13,19 @@ export function wallet(pk: Hex) {
   return { account, wc: createWalletClient({ account, chain, transport: http(env.RPC_URL) }) };
 }
 
-export async function stableInfo() {
-  const [decimals, symbol] = await Promise.all([
-    client.readContract({ address: STABLE, abi: erc20Abi, functionName: "decimals" }),
-    client.readContract({ address: STABLE, abi: erc20Abi, functionName: "symbol" }),
-  ]);
-  return { decimals, symbol };
+/** USD (1e18) per BNB from the minter's Chainlink feed */
+export async function bnbUsd(): Promise<bigint> {
+  return (await client.readContract({ address: POI, abi: poiAbi, functionName: "bnbUsd" })) as bigint;
 }
 
-export async function quote(usd: string) {
-  const { decimals } = await stableInfo();
-  const amount = parseUnits(usd, decimals);
-  const tokens = (await client.readContract({ address: POI, abi: poiAbi, functionName: "quote", args: [amount] })) as bigint;
-  return { amount, tokens, tokensFmt: formatUnits(tokens, 18) };
+/** tokens and USD value for paying `bnb` right now */
+export async function quote(bnb: string) {
+  const wei = parseEther(bnb);
+  const [tokens, usd18] = await Promise.all([
+    client.readContract({ address: POI, abi: poiAbi, functionName: "quote", args: [wei] }) as Promise<bigint>,
+    client.readContract({ address: POI, abi: poiAbi, functionName: "usdOf", args: [wei] }) as Promise<bigint>,
+  ]);
+  return { wei, tokens, tokensFmt: formatUnits(tokens, 18), usd: formatUnits(usd18, 18) };
 }
 
 async function ensureAllowance(pk: Hex, token: Address, spender: Address, amount: bigint) {
@@ -37,14 +37,15 @@ async function ensureAllowance(pk: Hex, token: Address, spender: Address, amount
   return hash;
 }
 
-export async function mine(pk: Hex, agentId: bigint, usd: string) {
+/** Pay `bnb` for inference credit on `agentId`; mints YAN to the signer. */
+export async function mine(pk: Hex, agentId: bigint, bnb: string) {
   const { account, wc } = wallet(pk);
-  const { decimals } = await stableInfo();
-  const amount = parseUnits(usd, decimals);
-  const bal = (await client.readContract({ address: STABLE, abi: erc20Abi, functionName: "balanceOf", args: [account.address] })) as bigint;
-  if (bal < amount) throw new Error(`stable balance ${formatUnits(bal, decimals)} < ${usd}`);
-  await ensureAllowance(pk, STABLE, POI, amount);
-  const hash = await wc.writeContract({ address: POI, abi: poiAbi, functionName: "mine", args: [agentId, amount] });
+  const value = parseEther(bnb);
+  const bal = await client.getBalance({ address: account.address });
+  if (bal < value) throw new Error(`BNB balance ${formatEther(bal)} < ${bnb} (plus gas)`);
+  const ok = (await client.readContract({ address: POI, abi: poiAbi, functionName: "isOperator", args: [agentId, account.address] })) as boolean;
+  if (!ok) throw new Error(`${account.address} is not the owner or agent wallet of agent ${agentId}`);
+  const hash = await wc.writeContract({ address: POI, abi: poiAbi, functionName: "mine", args: [agentId], value });
   const rc = await client.waitForTransactionReceipt({ hash });
   return { hash, status: rc.status, block: rc.blockNumber };
 }

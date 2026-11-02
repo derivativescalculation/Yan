@@ -7,8 +7,13 @@
  * is settled to the actual cost; on upstream failure it is released.
  *
  * Postgres when DATABASE_URL is set (required outside the local chain), else bun:sqlite.
+ *
+ * Every row carries the chain id: agentIds are only unique per chain, and one database may serve
+ * testnet and mainnet gateways.
  */
 import { env } from "./config";
+
+const CHAIN = env.CHAIN_ID;
 
 export interface UsageRow {
   agentId: string;
@@ -65,26 +70,30 @@ function sqliteLedger(): Ledger {
     cache_read INTEGER NOT NULL, cache_write INTEGER NOT NULL,
     cost_usd18 TEXT NOT NULL, raw_usd18 TEXT NOT NULL,
     request_id TEXT NOT NULL UNIQUE, pending INTEGER NOT NULL DEFAULT 0,
-    created_at INTEGER NOT NULL
-  ); CREATE INDEX IF NOT EXISTS usage_agent ON usage(agent_id);`);
-  const ins = db.prepare(`INSERT INTO usage (${SCHEMA_COLS}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+    created_at INTEGER NOT NULL, chain_id INTEGER NOT NULL DEFAULT 0
+  );`);
+  try {
+    db.exec(`ALTER TABLE usage ADD COLUMN chain_id INTEGER NOT NULL DEFAULT 0`);
+  } catch {}
+  db.exec(`CREATE INDEX IF NOT EXISTS usage_chain_agent ON usage(chain_id, agent_id);`);
+  const ins = db.prepare(`INSERT INTO usage (${SCHEMA_COLS}, chain_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
   const upd = db.prepare(`UPDATE usage SET input_tokens=?, output_tokens=?, cache_read=?, cache_write=?, cost_usd18=?, raw_usd18=?, pending=0 WHERE request_id=?`);
   const del = db.prepare(`DELETE FROM usage WHERE request_id=? AND pending=1`);
-  const sumQ = db.prepare(`SELECT cost_usd18 FROM usage WHERE agent_id=?`);
-  const infQ = db.prepare(`SELECT COUNT(*) AS n FROM usage WHERE agent_id=? AND pending=1`);
-  const rec = db.prepare(`SELECT * FROM usage WHERE agent_id=? AND pending=0 ORDER BY id DESC LIMIT ?`);
-  const tot = db.prepare(`SELECT cost_usd18, raw_usd18, output_tokens FROM usage WHERE pending=0`);
+  const sumQ = db.prepare(`SELECT cost_usd18 FROM usage WHERE chain_id=? AND agent_id=?`);
+  const infQ = db.prepare(`SELECT COUNT(*) AS n FROM usage WHERE chain_id=? AND agent_id=? AND pending=1`);
+  const rec = db.prepare(`SELECT * FROM usage WHERE chain_id=? AND agent_id=? AND pending=0 ORDER BY id DESC LIMIT ?`);
+  const tot = db.prepare(`SELECT cost_usd18, raw_usd18, output_tokens FROM usage WHERE chain_id=? AND pending=0`);
   return {
     async usedUsd18(agentId) {
       let s = 0n;
-      for (const r of sumQ.all(agentId) as any[]) s += BigInt(r.cost_usd18);
+      for (const r of sumQ.all(CHAIN, agentId) as any[]) s += BigInt(r.cost_usd18);
       return s;
     },
     async inflight(agentId) {
-      return Number((infQ.get(agentId) as any).n);
+      return Number((infQ.get(CHAIN, agentId) as any).n);
     },
     async reserve(requestId, agentId, model, reserveUsd18) {
-      ins.run(agentId, model, 0, 0, 0, 0, reserveUsd18.toString(), "0", requestId, 1, Date.now());
+      ins.run(agentId, model, 0, 0, 0, 0, reserveUsd18.toString(), "0", requestId, 1, Date.now(), CHAIN);
     },
     async settle(requestId, r) {
       upd.run(r.inputTokens, r.outputTokens, r.cacheRead, r.cacheWrite, r.costUsd18.toString(), r.rawUsd18.toString(), requestId);
@@ -93,11 +102,11 @@ function sqliteLedger(): Ledger {
       del.run(requestId);
     },
     async recent(agentId, limit) {
-      return (rec.all(agentId, limit) as any[]).map(mapRow);
+      return (rec.all(CHAIN, agentId, limit) as any[]).map(mapRow);
     },
     async totals() {
       let used = 0n, raw = 0n, out = 0, n = 0;
-      for (const r of tot.all() as any[]) {
+      for (const r of tot.all(CHAIN) as any[]) {
         used += BigInt(r.cost_usd18);
         raw += BigInt(r.raw_usd18);
         out += r.output_tokens;
@@ -120,21 +129,23 @@ async function pgLedger(url: string): Promise<Ledger> {
     cache_read INTEGER NOT NULL, cache_write INTEGER NOT NULL,
     cost_usd18 NUMERIC(40,0) NOT NULL, raw_usd18 NUMERIC(40,0) NOT NULL,
     request_id TEXT NOT NULL UNIQUE, pending SMALLINT NOT NULL DEFAULT 0,
-    created_at BIGINT NOT NULL
+    created_at BIGINT NOT NULL, chain_id INTEGER NOT NULL DEFAULT 0
   )`;
-  await sql`CREATE INDEX IF NOT EXISTS usage_agent ON usage(agent_id)`;
+  // rows written before chain scoping existed came from the BSC testnet gateway
+  await sql`ALTER TABLE usage ADD COLUMN IF NOT EXISTS chain_id INTEGER NOT NULL DEFAULT 97`;
+  await sql`CREATE INDEX IF NOT EXISTS usage_chain_agent ON usage(chain_id, agent_id)`;
   return {
     async usedUsd18(agentId) {
-      const [r] = await sql`SELECT COALESCE(SUM(cost_usd18),0)::text AS s FROM usage WHERE agent_id = ${agentId}`;
+      const [r] = await sql`SELECT COALESCE(SUM(cost_usd18),0)::text AS s FROM usage WHERE chain_id = ${CHAIN} AND agent_id = ${agentId}`;
       return BigInt(r.s);
     },
     async inflight(agentId) {
-      const [r] = await sql`SELECT COUNT(*)::int AS n FROM usage WHERE agent_id = ${agentId} AND pending = 1`;
+      const [r] = await sql`SELECT COUNT(*)::int AS n FROM usage WHERE chain_id = ${CHAIN} AND agent_id = ${agentId} AND pending = 1`;
       return r.n;
     },
     async reserve(requestId, agentId, model, reserveUsd18) {
-      await sql`INSERT INTO usage (agent_id, model, input_tokens, output_tokens, cache_read, cache_write, cost_usd18, raw_usd18, request_id, pending, created_at)
-        VALUES (${agentId}, ${model}, 0, 0, 0, 0, ${reserveUsd18.toString()}::numeric, 0, ${requestId}, 1, ${Date.now()})`;
+      await sql`INSERT INTO usage (agent_id, model, input_tokens, output_tokens, cache_read, cache_write, cost_usd18, raw_usd18, request_id, pending, created_at, chain_id)
+        VALUES (${agentId}, ${model}, 0, 0, 0, 0, ${reserveUsd18.toString()}::numeric, 0, ${requestId}, 1, ${Date.now()}, ${CHAIN})`;
     },
     async settle(requestId, r) {
       await sql`UPDATE usage SET input_tokens=${r.inputTokens}, output_tokens=${r.outputTokens}, cache_read=${r.cacheRead}, cache_write=${r.cacheWrite},
@@ -144,15 +155,29 @@ async function pgLedger(url: string): Promise<Ledger> {
       await sql`DELETE FROM usage WHERE request_id=${requestId} AND pending=1`;
     },
     async recent(agentId, limit) {
-      const rows = await sql`SELECT * FROM usage WHERE agent_id = ${agentId} AND pending = 0 ORDER BY id DESC LIMIT ${limit}`;
+      const rows = await sql`SELECT * FROM usage WHERE chain_id = ${CHAIN} AND agent_id = ${agentId} AND pending = 0 ORDER BY id DESC LIMIT ${limit}`;
       return rows.map(mapRow);
     },
     async totals() {
       const [r] = await sql`SELECT COUNT(*)::int AS n, COALESCE(SUM(cost_usd18),0)::text AS used,
-        COALESCE(SUM(raw_usd18),0)::text AS raw, COALESCE(SUM(output_tokens),0)::int AS o FROM usage WHERE pending = 0`;
+        COALESCE(SUM(raw_usd18),0)::text AS raw, COALESCE(SUM(output_tokens),0)::int AS o FROM usage WHERE chain_id = ${CHAIN} AND pending = 0`;
       return { requests: r.n, usedUsd18: BigInt(r.used), rawUsd18: BigInt(r.raw), outputTokens: r.o };
     },
   };
 }
 
-export const ledger: Ledger = env.DATABASE_URL ? await pgLedger(env.DATABASE_URL) : sqliteLedger();
+let _ledger: Ledger | null = null;
+async function getLedger(): Promise<Ledger> {
+  if (!_ledger) _ledger = env.DATABASE_URL ? await pgLedger(env.DATABASE_URL) : sqliteLedger();
+  return _ledger;
+}
+/** Lazily opened so that importing this module (e.g. from agent tools) never touches a database. */
+export const ledger: Ledger = {
+  usedUsd18: async (a) => (await getLedger()).usedUsd18(a),
+  inflight: async (a) => (await getLedger()).inflight(a),
+  reserve: async (r, a, m, u) => (await getLedger()).reserve(r, a, m, u),
+  settle: async (r, x) => (await getLedger()).settle(r, x),
+  release: async (r) => (await getLedger()).release(r),
+  recent: async (a, l) => (await getLedger()).recent(a, l),
+  totals: async () => (await getLedger()).totals(),
+};

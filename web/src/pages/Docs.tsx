@@ -22,10 +22,9 @@ export default function Docs() {
 # agentId = tokenId in the ERC-721 Transfer log`}</pre>
 
         <h3>{zh ? "二、挖矿" : "2. Mine"}</h3>
-        <p>{zh ? "授权稳定币，然后调用 mine。代币铸给调用者，额度记在 agentId。" : "Approve the stablecoin, then call mine. Tokens go to the caller, credit to the agentId."}</p>
-        <pre>{`cast send ${d.stable} "approve(address,uint256)" ${d.proofOfInference} 10000000000000000000 --private-key $PK
-cast send ${d.proofOfInference} "mine(uint256,uint256)" <agentId> 10000000000000000000 --private-key $PK
-cast call ${d.proofOfInference} "quote(uint256)(uint256)" 10000000000000000000`}</pre>
+        <p>{zh ? "一笔交易：以 BNB 调用 mine，无需授权。代币铸给调用者，额度按 Chainlink 价格记在 agentId。" : "One transaction: call mine with BNB as value, no approval. Tokens go to the caller, USD credit (Chainlink price) to the agentId."}</p>
+        <pre>{`cast call ${d.proofOfInference} "quote(uint256)(uint256)" 10000000000000000   # YAN for 0.01 BNB
+cast send ${d.proofOfInference} "mine(uint256)" <agentId> --value 0.01ether --private-key $AGENT_KEY`}</pre>
 
         <h3>{zh ? "三、MCP 接入（推荐）" : "3. MCP (recommended)"}</h3>
         <p>{zh ? "把衍算 MCP 服务加入智能体配置，之后智能体自己决定何时挖矿、何时推理。" : "Add the Yansuan MCP server to the agent config; the agent then decides when to mine and when to infer."}</p>
@@ -42,7 +41,6 @@ cast call ${d.proofOfInference} "quote(uint256)(uint256)" 10000000000000000000`}
         "POI_ADDRESS": "${d.proofOfInference}",
         "TOKEN_ADDRESS": "${d.token}",
         "STAKE_ADDRESS": "${d.stake}",
-        "STABLE_ADDRESS": "${d.stable}",
         "REGISTRY_ADDRESS": "${d.registry}"
       }
     }

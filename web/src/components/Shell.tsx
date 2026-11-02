@@ -1,5 +1,5 @@
 import { NavLink, Link } from "react-router-dom";
-import { useAccount, useConnect, useDisconnect, useBlockNumber } from "wagmi";
+import { useBlockNumber } from "wagmi";
 import { useProtocol } from "../hooks";
 import { fmt, compact } from "../chain";
 import type { ReactNode } from "react";
@@ -8,25 +8,6 @@ import { short, deployment, explorer, CHAIN_ID } from "../chain";
 
 export function Seal({ size = 28 }: { size?: number }) {
   return <img className="seal" src="/seal.svg" width={size} height={size} alt="衍算" />;
-}
-
-function Wallet() {
-  const { t } = useT();
-  const { address, isConnected } = useAccount();
-  const { connect, connectors, isPending } = useConnect();
-  const { disconnect } = useDisconnect();
-  if (isConnected && address)
-    return (
-      <button className="btn ghost" onClick={() => disconnect()} title={t("disconnect")}>
-        <span className="live" />
-        <span className="mono">{short(address)}</span>
-      </button>
-    );
-  return (
-    <button className="btn" disabled={isPending} onClick={() => connect({ connector: connectors[0] })}>
-      {t("connect")}
-    </button>
-  );
 }
 
 function Ticker() {
@@ -77,7 +58,7 @@ export function Shell({ children }: { children: ReactNode }) {
             <button className="lang" onClick={() => setLang(lang === "zh" ? "en" : "zh")}>
               {lang === "zh" ? <><b>中</b> / EN</> : <>中 / <b>EN</b></>}
             </button>
-            <Wallet />
+            <Link to="/mine" className="btn sm">{t("nav_connect_agent")}</Link>
           </div>
         </div>
       </header>

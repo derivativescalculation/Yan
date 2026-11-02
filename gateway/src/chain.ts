@@ -13,7 +13,6 @@ export const client = createPublicClient({ chain, transport: http(env.RPC_URL) }
 export const POI = env.POI_ADDRESS as Address;
 export const TOKEN = env.TOKEN_ADDRESS as Address;
 export const STAKE = env.STAKE_ADDRESS as Address;
-export const STABLE = env.STABLE_ADDRESS as Address;
 export const REGISTRY = env.REGISTRY_ADDRESS as Address;
 
 export const poiAbi = PoiAbi as any;
@@ -87,6 +86,8 @@ export interface ProtocolStats {
   currentEpoch: bigint;
   tokensPerUsd: bigint;
   costToCap: bigint;
+  bnbUsd: bigint;
+  totalWeiPaid: bigint;
   totalSupply: bigint;
   totalStaked: bigint;
   cap: bigint;
@@ -97,7 +98,7 @@ export async function stats(): Promise<ProtocolStats> {
     const poi = { address: POI, abi: poiAbi } as const;
     const rd = (c: { address: Address; abi: any; functionName: string }) =>
       client.readContract({ address: c.address, abi: c.abi, functionName: c.functionName }) as Promise<bigint>;
-    const [totalMinted, totalUsdPaid, totalRedeemed, agentCount, currentEpoch, tokensPerUsd, costToCap, totalSupply, totalStaked, cap] =
+    const [totalMinted, totalUsdPaid, totalRedeemed, agentCount, currentEpoch, tokensPerUsd, costToCap, totalSupply, totalStaked, cap, bnbUsd, totalWeiPaid] =
       await Promise.all([
         rd({ ...poi, functionName: "totalMinted" }),
         rd({ ...poi, functionName: "totalUsdPaid" }),
@@ -109,8 +110,10 @@ export async function stats(): Promise<ProtocolStats> {
         rd({ address: TOKEN, abi: tokenAbi, functionName: "totalSupply" }),
         rd({ address: STAKE, abi: stakeAbi, functionName: "totalStaked" }),
         rd({ address: TOKEN, abi: tokenAbi, functionName: "CAP" }),
+        rd({ ...poi, functionName: "bnbUsd" }),
+        rd({ ...poi, functionName: "totalWeiPaid" }),
       ]);
-    return { chainId: env.CHAIN_ID, totalMinted, totalUsdPaid, totalRedeemed, agentCount, currentEpoch, tokensPerUsd, costToCap, totalSupply, totalStaked, cap };
+    return { chainId: env.CHAIN_ID, totalMinted, totalUsdPaid, totalRedeemed, agentCount, currentEpoch, tokensPerUsd, costToCap, totalSupply, totalStaked, cap, bnbUsd, totalWeiPaid };
   });
 }
 
@@ -120,12 +123,13 @@ export interface MinedEvent {
   usd: bigint;
   tokens: bigint;
   epochAfter: bigint;
+  weiPaid: bigint;
   block: bigint;
   tx: `0x${string}`;
 }
 
 const minedAbi = parseAbiItem(
-  "event Mined(uint256 indexed agentId, address indexed miner, uint256 usdAmount18, uint256 tokensMinted, uint256 epochAfter)",
+  "event Mined(uint256 indexed agentId, address indexed miner, uint256 usdAmount18, uint256 tokensMinted, uint256 epochAfter, uint256 weiPaid)",
 );
 
 /// Mined events since DEPLOY_BLOCK, cached and extended incrementally. Single in-flight scan.
@@ -145,7 +149,7 @@ export function minedEvents(): Promise<MinedEvent[]> {
         const logs = await client.getLogs({ address: POI, event: minedAbi, fromBlock: from, toBlock: to });
         for (const l of logs) {
           const a = l.args;
-          fresh.push({ agentId: a.agentId!, miner: a.miner!, usd: a.usdAmount18!, tokens: a.tokensMinted!, epochAfter: a.epochAfter!, block: l.blockNumber!, tx: l.transactionHash! });
+          fresh.push({ agentId: a.agentId!, miner: a.miner!, usd: a.usdAmount18!, tokens: a.tokensMinted!, epochAfter: a.epochAfter!, weiPaid: a.weiPaid!, block: l.blockNumber!, tx: l.transactionHash! });
         }
       }
       minedCache = { upTo: head, events: [...minedCache.events, ...fresh] };

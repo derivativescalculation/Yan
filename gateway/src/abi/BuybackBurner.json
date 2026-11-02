@@ -3,11 +3,6 @@
     "type": "constructor",
     "inputs": [
       {
-        "name": "stable_",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
         "name": "token_",
         "type": "address",
         "internalType": "address"
@@ -18,12 +13,34 @@
         "internalType": "address"
       },
       {
+        "name": "maxPerCall_",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
         "name": "owner_",
         "type": "address",
         "internalType": "address"
       }
     ],
     "stateMutability": "nonpayable"
+  },
+  {
+    "type": "receive",
+    "stateMutability": "payable"
+  },
+  {
+    "type": "function",
+    "name": "MAX_SLIPPAGE_BPS",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
   },
   {
     "type": "function",
@@ -45,11 +62,6 @@
         "name": "minOut",
         "type": "uint256",
         "internalType": "uint256"
-      },
-      {
-        "name": "viaWbnb",
-        "type": "bool",
-        "internalType": "bool"
       }
     ],
     "outputs": [
@@ -76,6 +88,19 @@
         "name": "",
         "type": "bool",
         "internalType": "bool"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "maxPerCall",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
       }
     ],
     "stateMutability": "view"
@@ -146,19 +171,6 @@
   },
   {
     "type": "function",
-    "name": "stable",
-    "inputs": [],
-    "outputs": [
-      {
-        "name": "",
-        "type": "address",
-        "internalType": "contract IERC20"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
     "name": "token",
     "inputs": [],
     "outputs": [
@@ -185,7 +197,7 @@
   },
   {
     "type": "function",
-    "name": "totalStableSpent",
+    "name": "totalWeiSpent",
     "inputs": [],
     "outputs": [
       {
@@ -227,7 +239,7 @@
     "name": "Burned",
     "inputs": [
       {
-        "name": "stableIn",
+        "name": "weiIn",
         "type": "uint256",
         "indexed": false,
         "internalType": "uint256"
@@ -332,13 +344,12 @@
   },
   {
     "type": "error",
-    "name": "SafeERC20FailedOperation",
-    "inputs": [
-      {
-        "name": "token",
-        "type": "address",
-        "internalType": "address"
-      }
-    ]
+    "name": "ReentrancyGuardReentrantCall",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "SlippageTooLoose",
+    "inputs": []
   }
 ]

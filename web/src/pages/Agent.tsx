@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useReadContracts } from "wagmi";
 import { useT } from "../i18n";
-import { useGatewayAgent, useMinedLogs } from "../hooks";
+import { useGatewayAgent, useMining } from "../hooks";
 import { deployment, poiAbi, stakeAbi, fmt, compact, GATEWAY } from "../chain";
 import { SecHead, Stat, Addr, Tier } from "../components/Bits";
 
@@ -25,8 +25,8 @@ export default function Agent() {
   });
   const r = (i: number) => chain.data?.[i]?.result as bigint | undefined;
   const gw = useGatewayAgent(id);
-  const logs = useMinedLogs();
-  const mine = (logs.data ?? []).filter((e) => agentId !== undefined && e.agentId === agentId).reverse();
+  const mining = useMining(agentId);
+  const mine = mining.feed;
 
   return (
     <div className="wrap">

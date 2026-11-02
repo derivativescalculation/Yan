@@ -6,14 +6,15 @@ import {SuanToken} from "../src/SuanToken.sol";
 import {ProofOfInference} from "../src/ProofOfInference.sol";
 import {BuybackBurner} from "../src/BuybackBurner.sol";
 import {SuanStake} from "../src/SuanStake.sol";
-import {MockUSD} from "../src/mocks/MockUSD.sol";
 import {MockRegistry} from "../src/mocks/MockRegistry.sol";
 import {MockRouter} from "../src/mocks/MockRouter.sol";
+import {MockAggregator} from "../src/mocks/MockAggregator.sol";
 
-/// Local anvil stack with mock stable, registry and router. Registers one agent for the deployer.
+/// Local anvil stack with a mock price feed ($700/BNB), registry and router.
+/// Registers agent #1 for the deployer.
 contract DeployLocal is Script {
     struct Out {
-        address usd;
+        address feed;
         address reg;
         address router;
         address token;
@@ -36,17 +37,17 @@ contract DeployLocal is Script {
     }
 
     function _deploy(Out memory o) internal returns (Out memory) {
-        o.usd = address(new MockUSD("Test USD1", "USD1", 18));
+        o.feed = address(new MockAggregator(700e8, 8));
         o.reg = address(new MockRegistry());
         o.router = address(new MockRouter(address(0xB4B)));
-        // minter fixed at construction: token (n), burner (n+1), poi (n+2)
         address predicted = vm.computeCreateAddress(o.deployer, vm.getNonce(o.deployer) + 2);
         o.token = address(new SuanToken("Yansuan", "YAN", predicted));
-        o.burner = address(new BuybackBurner(o.usd, o.token, o.router, 2_000e18, o.deployer));
-        o.poi = address(new ProofOfInference(o.token, o.usd, o.reg, o.deployer, o.burner, 2000, 40_000e18, 7000, 1e18, 1000, o.deployer));
+        o.burner = address(new BuybackBurner(o.token, o.router, 5e18, o.deployer));
+        o.poi = address(
+            new ProofOfInference(o.token, o.feed, 365 days, o.reg, o.deployer, o.burner, 2000, 40_000e18, 7000, 1e18, 1000, o.deployer)
+        );
         require(o.poi == predicted, "minter prediction failed");
         o.stakeC = address(new SuanStake(o.token));
-        MockUSD(o.usd).mint(o.deployer, 1_000_000e18);
         o.agentId = MockRegistry(o.reg).register("http://localhost/agent.json");
         return o;
     }
@@ -60,7 +61,7 @@ contract DeployLocal is Script {
             '","stake":"', vm.toString(o.stakeC)
         );
         string memory b = string.concat(
-            '","stable":"', vm.toString(o.usd),
+            '","priceFeed":"', vm.toString(o.feed),
             '","registry":"', vm.toString(o.reg),
             '","router":"', vm.toString(o.router),
             '","opsTreasury":"', vm.toString(o.deployer),

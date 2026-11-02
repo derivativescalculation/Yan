@@ -1,6 +1,5 @@
 import { createConfig, http } from "wagmi";
 import { bsc, bscTestnet, foundry } from "wagmi/chains";
-import { injected } from "wagmi/connectors";
 import { parseAbi, type Address } from "viem";
 import PoiAbi from "./abi/ProofOfInference.json";
 import TokenAbi from "./abi/SuanToken.json";
@@ -13,7 +12,7 @@ export interface Deployment {
   proofOfInference: Address;
   burner: Address;
   stake: Address;
-  stable: Address;
+  priceFeed: Address;
   registry: Address;
   router: Address;
   opsTreasury: Address;
@@ -38,7 +37,6 @@ export const explorer =
 
 export const wagmiConfig = createConfig({
   chains: [chain],
-  connectors: [injected()],
   transports: { [chain.id]: http(RPC) } as any,
 });
 

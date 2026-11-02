@@ -9,12 +9,13 @@ import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { streamSSE } from "hono/streaming";
 import { z } from "zod";
-import { env } from "./config";
+import { env, assertServerConfig } from "./config";
 import { creditsUsd, stakedOf, stats, minedEvents, leaderboard, agentSeen } from "./chain";
 import { ledger } from "./ledger";
 import { ALLOWED_MODELS, chargedCost, rawCost, reserveFor, tierFor, fmtUsd, TIERS, assertSolvent } from "./pricing";
 import { authenticate } from "./auth";
 
+assertServerConfig();
 assertSolvent();
 
 const anthropic = new Anthropic();
@@ -48,7 +49,8 @@ app.get("/", (c) =>
   c.json({
     name: "衍算 Yansuan Gateway",
     chainId: env.CHAIN_ID,
-    contracts: { proofOfInference: env.POI_ADDRESS, token: env.TOKEN_ADDRESS, stake: env.STAKE_ADDRESS, stable: env.STABLE_ADDRESS, registry: env.REGISTRY_ADDRESS },
+    contracts: { proofOfInference: env.POI_ADDRESS, token: env.TOKEN_ADDRESS, stake: env.STAKE_ADDRESS, registry: env.REGISTRY_ADDRESS },
+    payment: "native BNB, valued in USD by the Chainlink BNB/USD feed",
     gatewayAgentId: env.GATEWAY_AGENT_ID?.toString() ?? null,
     models: ALLOWED_MODELS,
     tiers: json(TIERS),
@@ -70,7 +72,7 @@ app.get("/agent.json", (c) =>
   c.json({
     type: "https://eips.ethereum.org/EIPS/eip-8004#registration-v1",
     name: "衍算 Yansuan Gateway",
-    description: "Proof-of-Inference gateway on BNB Chain. Agents pay stablecoin for Claude inference; the payment mints $YAN. Only ERC-8004 agents can mint.",
+    description: "Proof-of-Inference gateway on BNB Chain. Agents pay BNB for Claude inference; the payment mints $YAN. Only ERC-8004 agents can mint.",
     image: `${env.PUBLIC_URL}/seal.svg`,
     services: [
       { name: "web", endpoint: env.PUBLIC_URL },
@@ -90,6 +92,12 @@ app.get("/v1/stats", async (c) => {
 
 app.get("/v1/leaderboard", async (c) => {
   const ev = await minedEvents();
+  const agent = c.req.query("agent");
+  if (agent !== undefined) {
+    if (!/^\d{1,30}$/.test(agent)) return c.json({ error: "bad agent" }, 400);
+    const id = BigInt(agent);
+    return c.json(json({ agents: [], recent: ev.filter((e) => e.agentId === id).slice(-50).reverse() }));
+  }
   return c.json(json({ agents: leaderboard(ev, 100), recent: ev.slice(-50).reverse() }));
 });
 
@@ -209,7 +217,7 @@ app.post("/v1/messages", async (c) => {
         status: 402 as const,
         balanceUsd: fmtUsd(balance),
         reserveUsd: fmtUsd(reserve),
-        hint: `call ProofOfInference.mine(${agentId}, amount) or redeem() to top up`,
+        hint: `send BNB to ProofOfInference.mine(${agentId}) or redeem() YAN to top up`,
       };
     }
     await ledger.reserve(requestId, agentId, body.model, reserve);

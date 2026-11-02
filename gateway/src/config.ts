@@ -10,7 +10,6 @@ const Env = z
     POI_ADDRESS: addr,
     TOKEN_ADDRESS: addr,
     STAKE_ADDRESS: addr,
-    STABLE_ADDRESS: addr,
     REGISTRY_ADDRESS: addr,
     /// block the contracts were deployed at; required on 56/97 so the event scan is complete
     DEPLOY_BLOCK: z.coerce.bigint().default(0n),
@@ -28,12 +27,14 @@ const Env = z
     PUBLIC_URL: z.string().default("http://localhost:8787"),
     /// ERC-8004 agentId of the gateway itself (after `bun src/register.ts`)
     GATEWAY_AGENT_ID: z.coerce.bigint().optional(),
-  })
-  .superRefine((e, ctx) => {
-    const local = e.CHAIN_ID === 31337;
-    if (!local && !e.DATABASE_URL) ctx.addIssue({ code: "custom", message: "DATABASE_URL is required outside chain 31337 (usage ledger must persist)" });
-    if (!local && e.DEPLOY_BLOCK === 0n) ctx.addIssue({ code: "custom", message: "DEPLOY_BLOCK is required outside chain 31337" });
   });
 
 export const env = Env.parse(process.env);
 export type Env = z.infer<typeof Env>;
+
+/** The HTTP gateway needs a persistent ledger and a complete event scan; agent-side tools (MCP, genesis) do not. */
+export function assertServerConfig() {
+  const local = env.CHAIN_ID === 31337;
+  if (!local && !env.DATABASE_URL) throw new Error("DATABASE_URL is required outside chain 31337 (usage ledger must persist)");
+  if (!local && env.DEPLOY_BLOCK === 0n) throw new Error("DEPLOY_BLOCK is required outside chain 31337");
+}

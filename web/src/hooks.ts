@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
-import { useReadContracts, usePublicClient } from "wagmi";
+import { useReadContracts, usePublicClient, useBalance } from "wagmi";
 import { parseAbiItem } from "viem";
-import { deployment, poiAbi, tokenAbi, stakeAbi, burnerAbi, erc20Abi, GATEWAY } from "./chain";
+import { deployment, poiAbi, tokenAbi, stakeAbi, burnerAbi, GATEWAY } from "./chain";
 
 export function useProtocol() {
   const d = deployment!;
@@ -22,15 +22,15 @@ export function useProtocol() {
       { address: d.token, abi: tokenAbi, functionName: "totalSupply" },
       { address: d.stake, abi: stakeAbi, functionName: "totalStaked" },
       { address: d.burner, abi: burnerAbi, functionName: "totalBurned" },
-      { address: d.burner, abi: burnerAbi, functionName: "totalStableSpent" },
-      { address: d.stable, abi: erc20Abi, functionName: "balanceOf", args: [d.opsTreasury] },
-      { address: d.stable, abi: erc20Abi, functionName: "balanceOf", args: [d.burner] },
-      { address: d.stable, abi: erc20Abi, functionName: "decimals" },
-      { address: d.stable, abi: erc20Abi, functionName: "symbol" },
+      { address: d.burner, abi: burnerAbi, functionName: "totalWeiSpent" },
+      { ...poi, functionName: "bnbUsd" },
+      { ...poi, functionName: "totalWeiPaid" },
     ],
     query: { refetchInterval: 12_000 },
   });
   const r = (i: number) => q.data?.[i]?.result as any;
+  const ops = useBalance({ address: d.opsTreasury, query: { refetchInterval: 15_000 } });
+  const burnerBal = useBalance({ address: d.burner, query: { refetchInterval: 15_000 } });
   return {
     loading: q.isLoading,
     totalMinted: r(0) as bigint | undefined,
@@ -47,35 +47,84 @@ export function useProtocol() {
     totalSupply: r(11) as bigint | undefined,
     totalStaked: r(12) as bigint | undefined,
     burnedByBuyback: r(13) as bigint | undefined,
-    stableSpent: r(14) as bigint | undefined,
-    opsBalance: r(15) as bigint | undefined,
-    burnerBalance: r(16) as bigint | undefined,
-    stableDecimals: (r(17) as number | undefined) ?? 18,
-    stableSymbol: (r(18) as string | undefined) ?? "USD",
+    weiSpent: r(14) as bigint | undefined,
+    bnbUsd: r(15) as bigint | undefined,
+    totalWeiPaid: r(16) as bigint | undefined,
+    opsBalance: ops.data?.value,
+    burnerBalance: burnerBal.data?.value,
   };
 }
 
 export const minedEvent = parseAbiItem(
-  "event Mined(uint256 indexed agentId, address indexed miner, uint256 usdAmount18, uint256 tokensMinted, uint256 epochAfter)",
+  "event Mined(uint256 indexed agentId, address indexed miner, uint256 usdAmount18, uint256 tokensMinted, uint256 epochAfter, uint256 weiPaid)",
 );
-export const burnedEvent = parseAbiItem("event Burned(uint256 stableIn, uint256 tokensBurned)");
+export const burnedEvent = parseAbiItem("event Burned(uint256 weiIn, uint256 tokensBurned)");
 
 export interface Mined {
   agentId: bigint;
   miner: `0x${string}`;
   usd: bigint;
   tokens: bigint;
+  wei: bigint;
   block: bigint;
   tx: `0x${string}`;
 }
 
-/** Direct chain read of Mined logs (works without the gateway). */
-export function useMinedLogs(window = 40_000n) {
+export interface LeaderRow {
+  agentId: bigint;
+  tokens: bigint;
+  usd: bigint;
+  txs: number;
+}
+
+/**
+ * Leaderboard + recent mints. Uses the gateway's full history since the deploy block; if the gateway
+ * is unreachable, falls back to on-chain logs over a recent block window (marked partial).
+ */
+export function useMining(agentId?: bigint) {
+  const chainLogs = useMinedLogs(40_000n, !GATEWAY);
+  const q = useQuery({
+    queryKey: ["mining", GATEWAY, agentId?.toString() ?? "all"],
+    enabled: !!GATEWAY,
+    retry: 1,
+    refetchInterval: 15_000,
+    queryFn: async () => {
+      const url = `${GATEWAY}/v1/leaderboard${agentId !== undefined ? `?agent=${agentId}` : ""}`;
+      const r = await fetch(url);
+      if (!r.ok) throw new Error(String(r.status));
+      const j = (await r.json()) as { agents: any[]; recent: any[] };
+      const rows: LeaderRow[] = j.agents.map((a) => ({ agentId: BigInt(a.agentId), tokens: BigInt(a.tokens), usd: BigInt(a.usd), txs: Number(a.txs) }));
+      const feed: Mined[] = j.recent.map((e) => ({
+        agentId: BigInt(e.agentId),
+        miner: e.miner,
+        usd: BigInt(e.usd),
+        tokens: BigInt(e.tokens),
+        wei: BigInt(e.weiPaid ?? 0),
+        block: BigInt(e.block),
+        tx: e.tx,
+      }));
+      return { rows, feed };
+    },
+  });
+  const fallback = useMinedLogs(40_000n, !!GATEWAY && q.isError);
+  if (q.data) return { rows: q.data.rows, feed: q.data.feed, loading: false, partial: false };
+  const src = GATEWAY ? fallback : chainLogs;
+  const events = (src.data ?? []).filter((e) => agentId === undefined || e.agentId === agentId);
+  return {
+    rows: leaderboard(events),
+    feed: [...events].reverse().slice(0, 60),
+    loading: q.isLoading || src.isLoading,
+    partial: true,
+  };
+}
+
+/** Direct chain read of Mined logs over a recent block window (fallback when the gateway is down). */
+export function useMinedLogs(window = 40_000n, enabled = true) {
   const pc = usePublicClient();
   const d = deployment!;
   return useQuery({
     queryKey: ["mined", d.proofOfInference],
-    enabled: !!pc,
+    enabled: !!pc && enabled,
     refetchInterval: 15_000,
     queryFn: async (): Promise<Mined[]> => {
       const head = await pc!.getBlockNumber();
@@ -91,6 +140,7 @@ export function useMinedLogs(window = 40_000n) {
             miner: l.args.miner!,
             usd: l.args.usdAmount18!,
             tokens: l.args.tokensMinted!,
+            wei: l.args.weiPaid!,
             block: l.blockNumber!,
             tx: l.transactionHash!,
           });
@@ -111,7 +161,7 @@ export function useBurnLogs(window = 40_000n) {
       const head = await pc!.getBlockNumber();
       const from = head > window ? head - window : 0n;
       const logs = await pc!.getLogs({ address: d.burner, event: burnedEvent, fromBlock: from, toBlock: head });
-      return logs.map((l) => ({ stableIn: l.args.stableIn!, tokens: l.args.tokensBurned!, block: l.blockNumber!, tx: l.transactionHash! }));
+      return logs.map((l) => ({ weiIn: l.args.weiIn!, tokens: l.args.tokensBurned!, block: l.blockNumber!, tx: l.transactionHash! }));
     },
   });
 }

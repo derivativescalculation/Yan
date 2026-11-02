@@ -1,112 +1,109 @@
-// Browser end-to-end: connect wallet, approve, mine, redeem, stake, check the agent page.
-// Runs against a local anvil chain with a scripted EIP-1193 wallet (anvil account 0 is unlocked).
-//   node e2e/mine.mjs  (expects vite on :5174 with VITE_CHAIN_ID=31337 and anvil on :8545)
+// Browser end-to-end against a local anvil chain.
+// The site is read-only: no wallet. An agent mines by sending a transaction from its own runtime
+// (simulated here with anvil's unlocked account 0, which owns agent #1), and the site must reflect it.
+//   bun run dev:anvil   (VITE_CHAIN_ID=31337 via .env.anvil)   then   SITE=http://127.0.0.1:5174 bun run e2e
 import { chromium } from "playwright";
+import { encodeFunctionData, parseEther } from "viem";
+import fs from "node:fs";
 
 const SITE = process.env.SITE ?? "http://127.0.0.1:5174";
 const RPC = "http://127.0.0.1:8545";
-const ADDR = "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266";
+const AGENT = "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266";
+const NOT_AGENT = "0x70997970C51812dc3A010C7d01b50e0d17dc79C8";
+const dep = JSON.parse(fs.readFileSync(new URL("../src/deployments/31337.json", import.meta.url), "utf8"));
+const mineAbi = [{ type: "function", name: "mine", stateMutability: "payable", inputs: [{ name: "agentId", type: "uint256" }], outputs: [{ type: "uint256" }] }];
 
-const provider = `
-(() => {
-  const RPC = ${JSON.stringify(RPC)}; const ADDR = ${JSON.stringify(ADDR)};
-  let id = 1; const listeners = {};
-  async function rpc(method, params) {
-    const r = await fetch(RPC, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: id++, method, params: params ?? [] }) });
-    const j = await r.json(); if (j.error) { const e = new Error(j.error.message); e.code = j.error.code; throw e; } return j.result;
+let rid = 1;
+async function rpc(method, params = []) {
+  const r = await fetch(RPC, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: rid++, method, params }) });
+  const j = await r.json();
+  if (j.error) throw new Error(j.error.message);
+  return j.result;
+}
+async function agentMine(from, bnb) {
+  const data = encodeFunctionData({ abi: mineAbi, functionName: "mine", args: [1n] });
+  const hash = await rpc("eth_sendTransaction", [{ from, to: dep.proofOfInference, data, value: "0x" + parseEther(bnb).toString(16) }]);
+  for (let i = 0; i < 50; i++) {
+    const rc = await rpc("eth_getTransactionReceipt", [hash]);
+    if (rc) return rc.status;
+    await new Promise((r) => setTimeout(r, 200));
   }
-  const eth = {
-    isMetaMask: true,
-    request: async ({ method, params }) => {
-      if (method === "eth_requestAccounts" || method === "eth_accounts") return [ADDR];
-      if (method === "wallet_switchEthereumChain" || method === "wallet_addEthereumChain") return null;
-      if (method === "wallet_requestPermissions" || method === "wallet_getPermissions") return [{ parentCapability: "eth_accounts" }];
-      if (method === "eth_sendTransaction") { const tx = { ...params[0], from: ADDR }; return rpc("eth_sendTransaction", [tx]); }
-      return rpc(method, params);
-    },
-    on: (ev, fn) => { (listeners[ev] ||= []).push(fn); },
-    removeListener: (ev, fn) => { listeners[ev] = (listeners[ev] || []).filter((f) => f !== fn); },
-  };
-  window.ethereum = eth;
-  window.addEventListener("eip6963:requestProvider", () => {
-    window.dispatchEvent(new CustomEvent("eip6963:announceProvider", { detail: Object.freeze({ info: { uuid: "test-wallet", name: "Test Wallet", icon: "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg'/>", rdns: "io.yansuan.test" }, provider: eth }) }));
-  });
-})();`;
+  throw new Error("no receipt");
+}
 
+const step = (s) => console.log("•", s);
 const browser = await chromium.launch({ channel: "msedge", headless: true });
 const page = await browser.newPage({ viewport: { width: 1280, height: 1600 } });
+page.setDefaultNavigationTimeout(180000);
+page.setDefaultTimeout(60000);
 const errors = [];
 page.on("pageerror", (e) => errors.push("pageerror: " + e.message));
 page.on("console", (m) => { if (m.type() === "error") errors.push("console: " + m.text()); });
-await page.addInitScript(provider);
 
-const step = (s) => console.log("•", s);
 try {
   await page.goto(`${SITE}/mine`, { waitUntil: "load" });
-  step("mine page loaded");
-
   await page.getByText(/chain 31337/).first().waitFor({ timeout: 20000 });
-  step("site is on the local chain");
-  const connect = page.getByRole("button", { name: /连接钱包|Connect/ }).first();
-  if (await connect.isVisible().catch(() => false)) await connect.click();
-  await page.getByText(/0xf39F…2266/).first().waitFor({ timeout: 20000 });
-  step("wallet connected");
+  step("mine page loaded on the local chain");
 
-  const panel = page.locator(".panel").first();
-  await panel.locator("input").nth(0).fill("1");
-  await panel.locator("input").nth(1).fill("10");
-  await panel.getByText(/400,000 YAN/).waitFor({ timeout: 20000 });
-  step("quote shows 400,000 YAN for 10 USD");
+  const walletButtons = await page.getByRole("button", { name: /连接钱包|Connect wallet|Disconnect/ }).count();
+  if (walletButtons !== 0) throw new Error("wallet button still present");
+  step("no wallet connection anywhere on the page");
 
-  await panel.getByRole("button", { name: /授权 10|Approve 10/ }).click();
-  const mineBtn = panel.getByRole("button", { name: /支付并铸造|Pay and mint/ });
-  await page.waitForFunction((sel) => { const b = [...document.querySelectorAll(sel + " button")].find((x) => /支付并铸造|Pay and mint/.test(x.textContent)); return b && !b.disabled; }, ".panel", { timeout: 30000 });
-  step("approve confirmed, mine button enabled");
+  await page.getByText(/yansuan_register/).first().waitFor();
+  await page.getByText(new RegExp(dep.proofOfInference)).first().waitFor();
+  step("agent guide shows the MCP config with the live minter address");
 
-  await mineBtn.click();
-  await panel.getByText(/^mined ·/).waitFor({ timeout: 60000 });
-  step("mine succeeded on-chain");
+  const minedBefore = await rpc("eth_call", [{ to: dep.proofOfInference, data: "0xa2309ff8" }, "latest"]).catch(() => "0x");
+  const fresh = !minedBefore || BigInt(minedBefore === "0x" ? 0 : minedBefore) === 0n;
+  if (fresh) {
+    // $700/BNB mock feed: 0.01 BNB = $7 -> 280,000 YAN at 40,000/USD (only true before any mint)
+    await page.getByText(/7\.00 USD/).first().waitFor({ timeout: 20000 });
+    await page.getByText(/280,000 YAN/).first().waitFor({ timeout: 20000 });
+    step("calculator: 0.01 BNB = 7.00 USD = 280,000 YAN");
+  } else {
+    await page.getByText(/7\.00 USD/).first().waitFor({ timeout: 20000 });
+    step("calculator: 0.01 BNB = 7.00 USD");
+  }
 
-  const p2 = page.locator(".panel").nth(1);
-  await p2.locator("input").nth(0).fill("1");
-  await p2.locator("input").nth(1).fill("100000");
-  await p2.getByText(/兑换额度|Redeem credit/).waitFor();
-  await p2.getByRole("button", { name: /授权 · redeem|Approve · redeem/ }).click();
-  await page.waitForFunction(() => [...document.querySelectorAll(".panel")][1].querySelector("button") && /销毁换算力|Redeem/.test([...document.querySelectorAll(".panel")][1].querySelectorAll("button")[0].textContent), null, { timeout: 30000 });
-  await p2.getByRole("button", { name: /销毁换算力|^Redeem$/ }).click();
-  await p2.getByText(/^redeemed ·/).waitFor({ timeout: 60000 });
-  step("redeem succeeded");
+  await page.locator(".panel input").fill("0.001");
+  await page.getByText(/1 美元的最低支付|\$1 minimum/).first().waitFor({ timeout: 10000 });
+  step("calculator warns below the $1 minimum");
 
-  await p2.getByRole("button", { name: /授权 · stake|Approve · stake/ }).click();
-  await page.waitForFunction(() => { const bs = [...[...document.querySelectorAll(".panel")][1].querySelectorAll("button")]; return bs.some((b) => /^质押$|^Stake$/.test(b.textContent.trim()) && !b.disabled); }, null, { timeout: 30000 });
-  await p2.getByRole("button", { name: /^质押$|^Stake$/ }).click();
-  await p2.getByText(/^staked ·/).waitFor({ timeout: 60000 });
-  step("stake succeeded");
+  let rejected = false;
+  try {
+    rejected = (await agentMine(NOT_AGENT, "0.01")) === "0x0"; // mined but reverted
+  } catch (e) {
+    rejected = /revert/i.test(e.message); // rejected at submission
+  }
+  if (!rejected) throw new Error("non-operator mine was not rejected");
+  step("contract rejects a mine from a non-operator wallet");
+
+  const status = await agentMine(AGENT, "0.01");
+  if (status !== "0x1") throw new Error("agent mine failed");
+  step("agent #1 mined 0.01 BNB from its own runtime");
+
+  await page.reload({ waitUntil: "load" });
+  await page.getByRole("link", { name: "#1" }).first().waitFor({ timeout: 30000 });
+  await page.getByText(/0\.0100/).first().waitFor({ timeout: 30000 });
+  step("leaderboard and feed show agent #1 with a 0.0100 BNB mint");
 
   await page.goto(`${SITE}/agent/1`, { waitUntil: "load" });
-  await page.getByText(/40\.0万|400\.0K/).first().waitFor({ timeout: 30000 });
-  await page.getByText(/10\.0万|100\.0K/).first().waitFor({ timeout: 30000 });
-  step("agent page shows 40.0万 mined and 10.0万 staked");
+  await page.locator(".agent-id").getByText("#1").waitFor({ timeout: 30000 });
+  await page.getByText(/万 *YAN|K *YAN|YAN/).first().waitFor({ timeout: 30000 });
+  step("agent page renders agent #1");
 
-  await page.goto(`${SITE}/mine`, { waitUntil: "load" });
-  await page.getByRole("link", { name: "#1" }).first().waitFor({ timeout: 30000 });
-  step("leaderboard lists agent #1");
-
-  // negative path: a wallet that does not operate agent 1 must see the error
-  const page2 = await browser.newPage({ viewport: { width: 1280, height: 1600 } });
-  await page2.addInitScript(provider.replace(ADDR, "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"));
-  await page2.goto(`${SITE}/mine`, { waitUntil: "load" });
-  const c2 = page2.getByRole("button", { name: /连接钱包|Connect/ }).first();
-  if (await c2.isVisible().catch(() => false)) await c2.click();
-  await page2.getByText(/0x7099…79C8/).first().waitFor({ timeout: 20000 });
-  await page2.locator(".panel").first().locator("input").nth(0).fill("1");
-  await page2.getByText(/not an operator of agent 1/).waitFor({ timeout: 20000 });
-  const disabled = await page2.getByRole("button", { name: /支付并铸造|Pay and mint/ }).isDisabled();
-  step(`non-operator wallet: error shown, mine button disabled=${disabled}`);
-  if (!disabled) throw new Error("mine button should be disabled for non-operator");
+  await page.goto(`${SITE}/treasury`, { waitUntil: "load" });
+  await page.getByText(/BNB/).first().waitFor({ timeout: 30000 });
+  const burner = BigInt(await rpc("eth_getBalance", [dep.burner, "latest"]));
+  const shown = (Number(burner) / 1e18).toFixed(4);
+  await page.getByText(new RegExp(shown.replace(".", "\\."))).first().waitFor({ timeout: 30000 });
+  step(`treasury shows ${shown} BNB in the burner (20% of all payments)`);
 
   const real = errors.filter((e) => !/favicon|ERR_CONNECTION_REFUSED|net::|8787/.test(e));
-  if (real.length) { console.log("console/page errors:", real); throw new Error("page errors"); }
+  if (real.length) {
+    console.log("console/page errors:", real);
+    throw new Error("page errors");
+  }
   console.log("PASS");
 } catch (e) {
   await page.screenshot({ path: "e2e/failure.png", fullPage: true }).catch(() => {});
