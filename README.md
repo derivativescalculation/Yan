@@ -143,17 +143,26 @@ The script precomputes the minter address, deploys token → burner → minter �
 
 | | BNB Chain mainnet (56) | BSC testnet (97) |
 |---|---|---|
-| YAN token | `0x460461dBa2643b62514ad199F0746ec080752e56` | `0xa408cF697B237aC034DF0908B5DC33437F07A03c` |
-| ProofOfInference | `0xbED42bc64FF8B69075626402b6fa6B3b3202C52c` | `0x3611B83353f9090d8466D75B73c165fDbf293DAD` |
-| BuybackBurner | `0xAC0CbcA517AFB8d8669f7B7479007c14FD602308` | `0x13CC9aA5744e68B4c9E9A3514DEb612527bdeC7f` |
-| SuanStake | `0x37F08A12cF58f340C572D3Ca426a181530Bf0549` | `0x7AE827a0a4254D1dA84129a624EA1D61F5D79353` |
+| YAN token | `0x87dB35408C15E0360431948BD579F38FFefDe680` | `0xa408cF697B237aC034DF0908B5DC33437F07A03c` |
+| ProofOfInference | `0x73Dcf1e3ef87A67B8AD398eDca34a3b08B506e3F` | `0x3611B83353f9090d8466D75B73c165fDbf293DAD` |
+| BuybackBurner | `0xA27a7E6CD43F12E650d7b7Dde236D16FC8E0ef70` | `0x13CC9aA5744e68B4c9E9A3514DEb612527bdeC7f` |
+| SuanStake | `0x55CeDe0fa71c161fFe7D9ccdbbfA8Eb156a76C21` | `0x7AE827a0a4254D1dA84129a624EA1D61F5D79353` |
 | Chainlink BNB/USD | `0x0567F2323251f0Aab15c8dFb1967E4e8A7D42aeE` | `0x2514895c72f50D8bd4B4F9b1110F0D6bD2c97526` |
 | Max price age | 3600 s | 86400 s |
 | Ops treasury | `0x16F7e765DC66D5589bc60e8005949921E066A65E` | deployer |
 | Gateway ERC-8004 agent | #401787 | #2705 |
-| Deploy block | 131230337 | 140370097 |
+| Deploy block | 131236902 | 140370097 |
 
-All contracts are verified on BscScan and Sourcify. Gateway: `https://api.yansuan.io`. Site: `https://yansuan.io`.
+All contracts are verified on BscScan. **The mainnet YAN token is `0x87dB35408C15E0360431948BD579F38FFefDe680`.** Any other token named Yansuan or YAN is not the protocol token.
+
+Superseded mainnet deployments (pre-launch iterations, not the protocol token):
+
+| Token | Minter | Note |
+|---|---|---|
+| `0xa19cB6ef09E3a5fDc36230afd25e1044078100Fd` | `0x073648Dd60402E39C332B49d76728EAE2820d2d8` | USD1-settled version, never minted |
+| `0x460461dBa2643b62514ad199F0746ec080752e56` | `0xbED42bc64FF8B69075626402b6fa6B3b3202C52c` | first BNB version; has a PancakeSwap pool `0xa66cf207e0eA2436F01e20214BCB04464F2092b3` |
+| `0x7AE827a0a4254D1dA84129a624EA1D61F5D79353` | `0xBA4930D6152A30b5e371720C6000CC7f218486d3` | "Yansuan Test" (YANT), integration test |
+ Gateway: `https://api.yansuan.io`. Site: `https://yansuan.io`.
 
 Known addresses:
 
