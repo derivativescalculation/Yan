@@ -127,6 +127,10 @@ cd web && bun x tsc --noEmit && bun x vite build
 # browser end-to-end against a local anvil chain: read-only site, agent mines from its own runtime, site reflects it
 cd web && bun run dev:anvil &   # needs .env.anvil with VITE_CHAIN_ID=31337 and src/deployments/31337.json
 cd web && SITE=http://127.0.0.1:5174 bun run e2e
+
+# live-site checks (read-only): every route in zh/en at desktop and phone width, plus the mint planner
+cd web && SITE=https://yansuan.io node e2e/audit.mjs
+cd web && SITE=https://yansuan.io node e2e/planner.mjs
 ```
 
 ## Deployment

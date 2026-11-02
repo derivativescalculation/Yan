@@ -38,7 +38,7 @@ code, .mono { font-family: var(--mono); font-size: 0.92em; }
 table { border-collapse: collapse; width: 100%; }
 th, td { text-align: left; padding: 12px 14px; border-bottom: 1px solid var(--line); vertical-align: top; }
 thead th { font-family: var(--mono); font-weight: 500; color: var(--ink-3); font-size: 11px; letter-spacing: 0.12em; border-bottom: 1px solid var(--ink); padding-bottom: 10px; }
-td.num, th.num { text-align: right; font-family: var(--mono); font-variant-numeric: tabular-nums; }
+td.num, th.num { text-align: right; font-family: var(--mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
 tbody tr:hover { background: var(--paper-2); }
 ::selection { background: var(--seal); color: var(--paper); }
 
@@ -125,6 +125,7 @@ tbody tr:hover { background: var(--paper-2); }
 .g3 h3 { font-size: 24px; margin-bottom: 12px; }
 .g3 p { color: var(--ink-2); font-size: 15px; max-width: 38ch; }
 .g2 { display: grid; grid-template-columns: 1fr 1fr; gap: 56px; }
+.g2 > *, .g3 > *, .strip > * { min-width: 0; }
 
 /* ---------- panels, forms */
 .panel { border: 1px solid var(--ink); background: #fbf9f4; }
@@ -152,7 +153,7 @@ tbody tr:hover { background: var(--paper-2); }
 .addr { font-family: var(--mono); font-size: 12.5px; }
 .muted { color: var(--ink-3); }
 .tbl-wrap { overflow-x: auto; }
-pre { background: var(--ink); color: var(--paper-2); padding: 18px 20px; font-family: var(--mono); font-size: 12.5px; line-height: 1.6; overflow-x: auto; margin: 0; }
+pre { max-width: 100%; background: var(--ink); color: var(--paper-2); padding: 18px 20px; font-family: var(--mono); font-size: 12.5px; line-height: 1.6; overflow-x: auto; margin: 0; }
 .doc h3 { font-size: 22px; margin: 40px 0 12px; }
 .doc p, .doc li { color: var(--ink-2); font-size: 15px; max-width: 72ch; }
 .doc ol, .doc ul { padding-left: 20px; }
@@ -212,3 +213,30 @@ pre { background: var(--ink); color: var(--paper-2); padding: 18px 20px; font-fa
   .panel .pb .hint { width: 100%; }
 }
 td.nowrap { white-space: nowrap; }
+
+/* ---------- code block with copy */
+.code { border: 1px solid var(--ink); background: var(--ink); max-width: 100%; }
+.code-h { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 8px 12px 8px 20px; border-bottom: 1px solid #2d2a23; font-family: var(--mono); font-size: 11px; letter-spacing: 0.12em; color: #9b9484; }
+.code-h button { font-family: var(--mono); font-size: 11px; letter-spacing: 0.1em; color: var(--paper); border: 1px solid #4a463d; padding: 4px 10px; }
+.code-h button:hover { border-color: var(--paper); }
+.code pre { border: 0; }
+.code + .code { margin-top: 16px; }
+
+/* ---------- amount presets */
+.chips { display: flex; gap: 8px; flex-wrap: wrap; margin: -4px 0 16px; }
+.chips button { font-family: var(--mono); font-size: 12px; border: 1px solid var(--line-2); padding: 6px 12px; background: #fff; }
+.chips button.on { border-color: var(--ink); background: var(--ink); color: var(--paper); }
+.warn { margin-top: 12px; font-size: 13px; color: var(--seal-2); border-left: 3px solid var(--seal); padding: 6px 12px; background: #fbf1ee; }
+
+/* ---------- update banner, 404 */
+.update { position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%); z-index: 50; background: var(--ink); color: var(--paper); border: 1px solid var(--ink); display: flex; align-items: center; gap: 16px; padding: 10px 12px 10px 18px; font-size: 13px; max-width: calc(100% - 32px); }
+.update button { background: var(--seal); color: var(--paper); font-weight: 700; padding: 6px 14px; font-family: var(--serif); }
+.notfound { padding: 120px 0 40px; }
+.notfound .big404 { font-family: var(--serif); font-weight: 900; font-size: 120px; line-height: 1; color: var(--seal); }
+
+@media (max-width: 560px) {
+  .strip .v { white-space: normal; }
+  .code-h { padding-left: 14px; }
+  pre { font-size: 11.5px; padding: 14px; }
+  .notfound .big404 { font-size: 84px; }
+}

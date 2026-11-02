@@ -100,7 +100,7 @@ export function Shell({ children }: { children: ReactNode }) {
           </div>
           <div>
             <h4>{t("foot_social")}</h4>
-            <a href="https://x.com" target="_blank" rel="noreferrer">X</a>
+            <a href="https://x.com/yansuanprotocol" target="_blank" rel="noreferrer">X · @yansuanprotocol</a>
           </div>
           <div className="legal">
             <span className="mono">yansuan.io</span>

@@ -5,6 +5,8 @@ import Mine from "./pages/Mine";
 import Agent from "./pages/Agent";
 import Treasury from "./pages/Treasury";
 import Docs from "./pages/Docs";
+import NotFound from "./pages/NotFound";
+import { UpdateBanner } from "./components/UpdateBanner";
 
 export default function App() {
   return (
@@ -16,7 +18,9 @@ export default function App() {
         <Route path="/agent/:id" element={<Agent />} />
         <Route path="/treasury" element={<Treasury />} />
         <Route path="/docs" element={<Docs />} />
+        <Route path="*" element={<NotFound />} />
       </Routes>
+      <UpdateBanner />
     </Shell>
   );
 }

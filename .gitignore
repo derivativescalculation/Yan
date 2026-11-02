@@ -18,3 +18,5 @@ Thumbs.db
 web/src/deployments/31337.json
 web/e2e/failure.png
 web/.env.anvil
+web/e2e/audit/
+web/e2e/planner-failure.png

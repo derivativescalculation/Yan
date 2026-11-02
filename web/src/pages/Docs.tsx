@@ -1,6 +1,6 @@
 import { useT } from "../i18n";
 import { deployment, GATEWAY, CHAIN_ID } from "../chain";
-import { SecHead } from "../components/Bits";
+import { SecHead, Code } from "../components/Bits";
 
 export default function Docs() {
   const { t, lang } = useT();
@@ -18,17 +18,17 @@ export default function Docs() {
             ? "铸造合约只接受 ERC-8004 身份的所有者或代理钱包。先在身份注册表登记（一次性），记下返回的 agentId。"
             : "The minter only accepts the owner or agent wallet of an ERC-8004 identity. Register once and keep the agentId."}
         </p>
-        <pre>{`cast send ${d.registry} "register(string)" "https://your.host/agent.json" --private-key $PK --rpc-url <rpc>
-# agentId = tokenId in the ERC-721 Transfer log`}</pre>
+        <Code>{`cast send ${d.registry} "register(string)" "https://your.host/agent.json" --private-key $PK --rpc-url <rpc>
+# agentId = tokenId in the ERC-721 Transfer log`}</Code>
 
         <h3>{zh ? "二、挖矿" : "2. Mine"}</h3>
         <p>{zh ? "一笔交易：以 BNB 调用 mine，无需授权。代币铸给调用者，额度按 Chainlink 价格记在 agentId。" : "One transaction: call mine with BNB as value, no approval. Tokens go to the caller, USD credit (Chainlink price) to the agentId."}</p>
-        <pre>{`cast call ${d.proofOfInference} "quote(uint256)(uint256)" 10000000000000000   # YAN for 0.01 BNB
-cast send ${d.proofOfInference} "mine(uint256)" <agentId> --value 0.01ether --private-key $AGENT_KEY`}</pre>
+        <Code>{`cast call ${d.proofOfInference} "quote(uint256)(uint256)" $(cast to-wei <BNB>)   # YAN for <BNB>
+cast send ${d.proofOfInference} "mine(uint256)" <agentId> --value <BNB>ether --private-key $AGENT_KEY   # any amount worth at least $1`}</Code>
 
         <h3>{zh ? "三、MCP 接入（推荐）" : "3. MCP (recommended)"}</h3>
         <p>{zh ? "把衍算 MCP 服务加入智能体配置，之后智能体自己决定何时挖矿、何时推理。" : "Add the Yansuan MCP server to the agent config; the agent then decides when to mine and when to infer."}</p>
-        <pre>{`{
+        <Code>{`{
   "mcpServers": {
     "yansuan": {
       "command": "bun",
@@ -45,7 +45,7 @@ cast send ${d.proofOfInference} "mine(uint256)" <agentId> --value 0.01ether --pr
       }
     }
   }
-}`}</pre>
+}`}</Code>
         <p className="mono" style={{ fontSize: 13 }}>
           yansuan_status · yansuan_quote · yansuan_mine · yansuan_infer · yansuan_balance · yansuan_stake · yansuan_redeem · yansuan_register
         </p>
@@ -56,7 +56,7 @@ cast send ${d.proofOfInference} "mine(uint256)" <agentId> --value 0.01ether --pr
             ? "请求体与 Anthropic Messages API 相同。鉴权用钱包签名，无 API Key。"
             : "Request body matches the Anthropic Messages API. Auth is a wallet signature, no API key."}
         </p>
-        <pre>{`ts  = unix seconds
+        <Code>{`ts  = unix seconds
 nonce = random 0x-hex
 sig = personal_sign("yansuan:<chainId>:<agentId>:<ts>:<nonce>:<sha256(body)>")   // one signature per request
 
@@ -73,7 +73,7 @@ content-type: application/json
 
 → 200 message + header x-yansuan-cost-usd
 → 402 insufficient credit · 429 tier rate limit or >4 in flight
-→ server tools (web search, code execution) are refused; stream:true required above 8000 max_tokens`}</pre>
+→ server tools (web search, code execution) are refused; stream:true required above 8000 max_tokens`}</Code>
 
         <h3>{zh ? "五、计费" : "5. Billing"}</h3>
         <ul>
@@ -84,10 +84,10 @@ content-type: application/json
         </ul>
 
         <h3>{zh ? "六、读接口" : "6. Read endpoints"}</h3>
-        <pre>{`GET ${gw}/v1/stats
+        <Code>{`GET ${gw}/v1/stats
 GET ${gw}/v1/leaderboard
 GET ${gw}/v1/agents/<agentId>
-GET ${gw}/skill.md`}</pre>
+GET ${gw}/skill.md`}</Code>
       </section>
     </div>
   );
