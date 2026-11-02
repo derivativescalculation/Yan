@@ -30,9 +30,10 @@ for (const lang of LANGS) {
   for (const [vp, size] of Object.entries(VIEWPORTS)) {
     const ctx = await browser.newContext({ viewport: size, deviceScaleFactor: 1 });
     await ctx.addInitScript((l) => { try { localStorage.setItem("lang", l); } catch {} }, lang);
-    const page = await ctx.newPage();
-    page.setDefaultTimeout(45_000);
     for (const route of ROUTES) {
+      // a fresh tab per route keeps one long-lived renderer from running out of memory
+      const page = await ctx.newPage();
+      page.setDefaultTimeout(45_000);
       const where = `${lang}/${vp}${route}`;
       const errs = [];
       const onErr = (e) => errs.push("pageerror " + e.message);
@@ -43,7 +44,8 @@ for (const lang of LANGS) {
       // let chain reads and the gateway respond
       for (let i = 0; i < 20; i++) {
         const t = await page.evaluate(() => document.body.innerText);
-        if (!LOADING.test(t) && !/…/.test(t.split("\n").slice(0, 40).join(" "))) break;
+        // a lone "…" is a value still loading; "0x94dE…b15F" is just a shortened address
+        if (!LOADING.test(t) && !/(^|\s)…(\s|$)/.test(t.split("\n").slice(0, 40).join(" "))) break;
         await page.waitForTimeout(1500);
       }
       await page.waitForTimeout(2500);
@@ -58,7 +60,7 @@ for (const lang of LANGS) {
       for (const e of errs) note(where, e);
       (await page.$$eval("a[href]", (as) => as.map((a) => a.href))).forEach((h) => links.add(h));
       await page.screenshot({ path: OUT + `${lang}-${vp}${route.replace(/\//g, "_") || "_"}.png`, fullPage: true });
-      page.off("pageerror", onErr); page.off("console", onCon); page.off("response", onResp);
+      await page.close();
     }
     await ctx.close();
   }
