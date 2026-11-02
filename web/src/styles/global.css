@@ -202,4 +202,7 @@ pre { background: var(--ink); color: var(--paper-2); padding: 18px 20px; font-fa
   .top .wrap { gap: 12px; }
   .foot .wrap { grid-template-columns: 1fr; }
   .agent-id { font-size: 40px; }
+  .panel .pb .btn { width: 100%; }
+  .panel .pb .hint { width: 100%; }
 }
+td.nowrap { white-space: nowrap; }

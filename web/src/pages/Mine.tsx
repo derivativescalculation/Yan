@@ -126,7 +126,7 @@ export default function Mine() {
     <div className="wrap">
       <section className="sec" style={{ paddingTop: 56 }}>
         <SecHead no="一" h={t("mine_h")} p={t("mine_p")} />
-        <div className="g2" style={{ gridTemplateColumns: "1fr 1fr", alignItems: "start" }}>
+        <div className="g2" style={{ alignItems: "start" }}>
           <MinePanel />
           <RedeemStakePanel />
         </div>

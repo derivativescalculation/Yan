@@ -69,7 +69,7 @@ export default function Agent() {
                       {!gw.data?.recent?.length ? <tr><td colSpan={5} className="empty">{t("none")}</td></tr> : null}
                       {gw.data?.recent?.map((u, i) => (
                         <tr key={i}>
-                          <td className="mono">{new Date(u.createdAt).toISOString().slice(0, 16).replace("T", " ")}</td>
+                          <td className="mono nowrap">{new Date(u.createdAt).toISOString().slice(5, 16).replace("T", " ")}</td>
                           <td className="mono">{u.model.replace("claude-", "")}</td>
                           <td className="num">{u.inputTokens.toLocaleString()}</td>
                           <td className="num">{u.outputTokens.toLocaleString()}</td>
