@@ -123,6 +123,10 @@ bun run dev
 cd contracts && forge test -vvv
 cd gateway && bun x tsc --noEmit
 cd web && bun x tsc --noEmit && bun x vite build
+
+# browser end-to-end against a local anvil chain (scripted wallet: connect, approve, mine, redeem, stake)
+cd web && bun run dev:anvil &   # needs .env.anvil with VITE_CHAIN_ID=31337 and src/deployments/31337.json
+cd web && SITE=http://127.0.0.1:5174 bun run e2e
 ```
 
 ## Deployment

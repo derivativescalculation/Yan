@@ -15,3 +15,6 @@ contracts/cache/
 *.tsbuildinfo
 .DS_Store
 Thumbs.db
+web/src/deployments/31337.json
+web/e2e/failure.png
+web/.env.anvil
