@@ -6,7 +6,6 @@
   "scripts": {
     "dev": "bun --watch src/server.ts",
     "start": "bun src/server.ts",
-    "mcp": "bun src/mcp.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

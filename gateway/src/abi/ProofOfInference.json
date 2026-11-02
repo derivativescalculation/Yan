@@ -3,67 +3,83 @@
     "type": "constructor",
     "inputs": [
       {
-        "name": "token_",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "priceFeed_",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "maxPriceAge_",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "registry_",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "opsTreasury_",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "burner_",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "burnBps_",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "initialTokensPerUsd_",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "decayBps_",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "minPaymentUsd_",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "redeemBps_",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "owner_",
-        "type": "address",
-        "internalType": "address"
+        "name": "c",
+        "type": "tuple",
+        "internalType": "struct ProofOfInference.Config",
+        "components": [
+          {
+            "name": "token",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "priceFeed",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "maxPriceAge",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "agentIds",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "opsTreasury",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "burner",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "burnBps",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "initialTokensPerUsd",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "decayBps",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "minPaymentUsd",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "redeemBps",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "maxPerAgentPerEpoch",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "owner",
+            "type": "address",
+            "internalType": "address"
+          }
+        ]
       }
     ],
     "stateMutability": "nonpayable"
+  },
+  {
+    "type": "receive",
+    "stateMutability": "payable"
   },
   {
     "type": "function",
@@ -120,6 +136,19 @@
         "name": "",
         "type": "uint256",
         "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "agentIds",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "contract IAgentIdRegistry"
       }
     ],
     "stateMutability": "view"
@@ -194,9 +223,9 @@
     "name": "creditsUsd",
     "inputs": [
       {
-        "name": "agentId",
-        "type": "uint256",
-        "internalType": "uint256"
+        "name": "wallet",
+        "type": "address",
+        "internalType": "address"
       }
     ],
     "outputs": [
@@ -249,6 +278,25 @@
   },
   {
     "type": "function",
+    "name": "handleOf",
+    "inputs": [
+      {
+        "name": "wallet",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "string",
+        "internalType": "string"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
     "name": "initialTokensPerUsd",
     "inputs": [],
     "outputs": [
@@ -262,15 +310,10 @@
   },
   {
     "type": "function",
-    "name": "isOperator",
+    "name": "isAgent",
     "inputs": [
       {
-        "name": "agentId",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "who",
+        "name": "wallet",
         "type": "address",
         "internalType": "address"
       }
@@ -280,6 +323,19 @@
         "name": "",
         "type": "bool",
         "internalType": "bool"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "maxPerAgentPerEpoch",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
       }
     ],
     "stateMutability": "view"
@@ -313,13 +369,7 @@
   {
     "type": "function",
     "name": "mine",
-    "inputs": [
-      {
-        "name": "agentId",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
+    "inputs": [],
     "outputs": [
       {
         "name": "minted",
@@ -331,10 +381,34 @@
   },
   {
     "type": "function",
-    "name": "minedByAgent",
+    "name": "minedBy",
     "inputs": [
       {
-        "name": "agentId",
+        "name": "wallet",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "amount",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "minedInEpoch",
+    "inputs": [
+      {
+        "name": "wallet",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "epoch",
         "type": "uint256",
         "internalType": "uint256"
       }
@@ -501,11 +575,6 @@
     "name": "redeem",
     "inputs": [
       {
-        "name": "agentId",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
         "name": "tokens",
         "type": "uint256",
         "internalType": "uint256"
@@ -535,12 +604,12 @@
   },
   {
     "type": "function",
-    "name": "redeemedByAgent",
+    "name": "redeemedBy",
     "inputs": [
       {
-        "name": "agentId",
-        "type": "uint256",
-        "internalType": "uint256"
+        "name": "wallet",
+        "type": "address",
+        "internalType": "address"
       }
     ],
     "outputs": [
@@ -554,13 +623,19 @@
   },
   {
     "type": "function",
-    "name": "registry",
-    "inputs": [],
+    "name": "remainingThisEpoch",
+    "inputs": [
+      {
+        "name": "wallet",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
     "outputs": [
       {
         "name": "",
-        "type": "address",
-        "internalType": "contract IERC8004Identity"
+        "type": "uint256",
+        "internalType": "uint256"
       }
     ],
     "stateMutability": "view"
@@ -577,9 +652,9 @@
     "name": "seen",
     "inputs": [
       {
-        "name": "agentId",
-        "type": "uint256",
-        "internalType": "uint256"
+        "name": "wallet",
+        "type": "address",
+        "internalType": "address"
       }
     ],
     "outputs": [
@@ -713,16 +788,16 @@
     "name": "Mined",
     "inputs": [
       {
-        "name": "agentId",
-        "type": "uint256",
-        "indexed": true,
-        "internalType": "uint256"
-      },
-      {
-        "name": "miner",
+        "name": "agent",
         "type": "address",
         "indexed": true,
         "internalType": "address"
+      },
+      {
+        "name": "handle",
+        "type": "string",
+        "indexed": false,
+        "internalType": "string"
       },
       {
         "name": "usdAmount18",
@@ -807,13 +882,7 @@
     "name": "Redeemed",
     "inputs": [
       {
-        "name": "agentId",
-        "type": "uint256",
-        "indexed": true,
-        "internalType": "uint256"
-      },
-      {
-        "name": "redeemer",
+        "name": "wallet",
         "type": "address",
         "indexed": true,
         "internalType": "address"
@@ -845,6 +914,17 @@
       }
     ],
     "anonymous": false
+  },
+  {
+    "type": "error",
+    "name": "AgentEpochCap",
+    "inputs": [
+      {
+        "name": "remaining",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ]
   },
   {
     "type": "error",
@@ -883,13 +963,8 @@
   },
   {
     "type": "error",
-    "name": "NotAgentOperator",
+    "name": "NotAnAgent",
     "inputs": [
-      {
-        "name": "agentId",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
       {
         "name": "caller",
         "type": "address",

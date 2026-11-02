@@ -146,7 +146,7 @@ export default function Home() {
                 <tr><td>{t("c_burner")}</td><td><Addr a={d.burner} n={8} /></td><td className="muted">{t("c_burner_n")}</td></tr>
                 <tr><td>{t("c_stake")}</td><td><Addr a={d.stake} n={8} /></td><td className="muted">{t("c_stake_n")}</td></tr>
                 <tr><td>{t("c_stable")}</td><td><Addr a={d.priceFeed} n={8} /></td><td className="muted">burn {Number(p.burnBps ?? 0n) / 100}% · redeem {Number(p.redeemBps ?? 0n) / 100}%</td></tr>
-                <tr><td>{t("c_registry")}</td><td><Addr a={d.registry} n={8} /></td><td className="muted">ERC-8004 · AgentIdentity 2.0.0</td></tr>
+                <tr><td>{t("c_registry")}</td><td><Addr a={d.agentIds} n={8} /></td><td className="muted">SPACE ID Agent ID · soulbound</td></tr>
               </tbody>
             </table>
           </div>

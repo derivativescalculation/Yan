@@ -13,7 +13,8 @@ export interface Deployment {
   burner: Address;
   stake: Address;
   priceFeed: Address;
-  registry: Address;
+  agentIds: Address;
+  maxPerAgentPerEpoch?: string;
   router: Address;
   opsTreasury: Address;
 }

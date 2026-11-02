@@ -1,56 +1,64 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
-import { useReadContract } from "wagmi";
-import { parseAbi, parseEther } from "viem";
+import { parseEther } from "viem";
 import { useT } from "../i18n";
-import { useMining, useProtocol } from "../hooks";
-import { deployment, poiAbi, fmt, compact, short, GATEWAY, CHAIN_ID, RPC } from "../chain";
+import { useMining, useProtocol, useQuote } from "../hooks";
+import { deployment, fmt, compact, GATEWAY } from "../chain";
 import { SecHead, Addr, Panel, Code } from "../components/Bits";
 
-const REPO = "https://github.com/derivativescalculation/Yan";
-const PRESETS = ["0.005", "0.01", "0.05", "0.1", "0.5"];
-const registryAbi = parseAbi(["function ownerOf(uint256 agentId) view returns (address)"]);
+const PRESETS = ["0.005", "0.01", "0.02", "0.035"];
+const SKILL = "npx skills add binance/binance-skills-hub/skills/binance-web3/binance-agentic-wallet";
+const MINE_DATA = "0x99f4b251"; // mine()
 
-function rpcUrl() {
-  return RPC || (CHAIN_ID === 56 ? "https://bsc-dataseed.bnbchain.org" : "https://bsc-testnet-rpc.publicnode.com");
-}
-
-/** Pick an amount, see what it mints, get the exact command for that amount. */
-function MintPlanner() {
+/** Pick an amount and (optionally) your .ai name; get a ready prompt for your Binance agent. */
+function PromptBuilder() {
   const { t, lang } = useT();
   const zh = lang === "zh";
   const d = deployment!;
   const p = useProtocol();
   const [bnb, setBnb] = useState("0.01");
-  const [agent, setAgent] = useState("");
+  const [who, setWho] = useState("");
 
-  const wei = (() => {
-    try {
-      return /^\d*\.?\d+$/.test(bnb) ? parseEther(bnb) : 0n;
-    } catch {
-      return 0n;
-    }
-  })();
-  const agentId = /^\d{1,30}$/.test(agent) ? BigInt(agent) : undefined;
-
-  const q = useReadContract({ address: d.proofOfInference, abi: poiAbi, functionName: "quote", args: [wei], query: { enabled: wei > 0n, refetchInterval: 15_000 } });
-  const owner = useReadContract({ address: d.registry, abi: registryAbi, functionName: "ownerOf", args: [agentId ?? 0n], query: { enabled: agentId !== undefined, retry: 0 } });
+  const valid = /^\d*\.?\d+$/.test(bnb) && Number(bnb) > 0;
+  const wei = valid ? parseEther(bnb) : 0n;
+  const agent = who.trim().toLowerCase();
+  const agentArg = /^0x[0-9a-f]{40}$/.test(agent) || /^[a-z0-9]{1,64}(\.ai)?$/.test(agent) ? agent : "";
+  const q = useQuote(valid ? bnb : "", agentArg || undefined);
 
   const usd = p.bnbUsd !== undefined ? (wei * p.bnbUsd) / 10n ** 18n : undefined;
-  const minWei = p.bnbUsd ? (10n ** 36n + p.bnbUsd - 1n) / p.bnbUsd : undefined; // $1 minimum, rounded up
-  const invalid = bnb !== "" && wei === 0n;
-  const belowMin = wei > 0n && minWei !== undefined && wei < minWei;
-  const overCap = usd !== undefined && p.costToCap !== undefined && usd > p.costToCap;
-  const ok = wei > 0n && !belowMin && !overCap;
+  const minWei = p.bnbUsd && p.minPaymentUsd ? (p.minPaymentUsd * 10n ** 18n + p.bnbUsd - 1n) / p.bnbUsd : undefined;
+  const belowMin = valid && minWei !== undefined && wei < minWei;
+  const capTokens = p.maxPerAgentPerEpoch && p.maxPerAgentPerEpoch > 0n ? p.maxPerAgentPerEpoch : undefined;
+  const tokens = q.data ? BigInt(q.data.tokens) : undefined;
+  const overAgentCap = q.data?.agent && q.data.canMine === false && /allowance/.test(q.data.reason ?? "");
+  const agentMissing = agentArg && q.data && q.data.agent === null;
+  const agentNoId = agentArg && q.data?.agent && !q.data.agent.handle;
+  const ok = valid && !belowMin && !overAgentCap && !agentMissing && !agentNoId;
 
   const amt = ok ? bnb : "<BNB>";
-  const id = agentId !== undefined ? agentId.toString() : "<agentId>";
-  const mcpCall = `yansuan_mine { "bnb": "${amt}" }`;
-  const castCmd = `cast send ${d.proofOfInference} \\
-  "mine(uint256)" ${id} \\
-  --value ${amt}ether \\
-  --private-key $AGENT_KEY \\
-  --rpc-url ${rpcUrl()}`;
+  const weiStr = ok ? wei.toString() : "<wei>";
+  const gw = GATEWAY || "https://api.yansuan.io";
+  const prompt = zh
+    ? `用我的币安 Agentic Wallet 铸造衍算 YAN，支付 ${amt} BNB（BNB Chain，链 ID 56）。
+1. 运行 baw wallet agent-id --json，确认已领取 .ai Agent ID；没有就停止并告诉我。
+2. 运行 baw wallet settings --json，确认 devMode.enabled 为 true；没有就告诉我去币安 App 打开开发者模式（Agentic Wallet → 设置 → 开发者模式）。
+3. 运行 baw wallet address --json，取得我的 BSC 钱包地址。
+4. 打开 ${gw}/v1/quote?bnb=${amt}&agent=<我的钱包地址>，如果 canMine 不是 true，停止并告诉我 reason。
+5. 预览：baw contract-call preview --binanceChainId 56 --from <我的钱包地址> --to ${d.proofOfInference} --value ${weiStr} --inputData ${MINE_DATA} --json
+6. 把解析出的交易与风险给我看，等我明确回复"确认"后，再运行 baw contract-call execute --requestId <requestId> --json。
+合约地址只能是 ${d.proofOfInference}，不要使用任何其它地址。`
+    : `Mint Yansuan (YAN) with my Binance Agentic Wallet, paying ${amt} BNB on BNB Chain (chain ID 56).
+1. Run baw wallet agent-id --json and confirm I have claimed a .ai Agent ID; if not, stop and tell me.
+2. Run baw wallet settings --json and confirm devMode.enabled is true; if not, tell me to turn on Developer Mode in the Binance app (Agentic Wallet → Settings → Developer Mode).
+3. Run baw wallet address --json to get my BSC wallet address.
+4. Open ${gw}/v1/quote?bnb=${amt}&agent=<my wallet address>; if canMine is not true, stop and tell me the reason.
+5. Preview: baw contract-call preview --binanceChainId 56 --from <my wallet address> --to ${d.proofOfInference} --value ${weiStr} --inputData ${MINE_DATA} --json
+6. Show me the parsed transaction and risks, wait for my explicit "yes", then run baw contract-call execute --requestId <requestId> --json.
+The contract address must be ${d.proofOfInference}. Never use any other address.`;
+  const raw = `to:    ${d.proofOfInference}
+value: ${weiStr}   (${amt} BNB)
+data:  ${MINE_DATA}   (mine())
+chain: 56`;
 
   return (
     <div className="g2" style={{ alignItems: "start" }}>
@@ -65,39 +73,46 @@ function MintPlanner() {
           ))}
         </div>
         <div className="field">
-          <label>{zh ? "agentId（可选，用于生成指令）" : "agentId (optional, fills the command)"}</label>
-          <input value={agent} onChange={(e) => setAgent(e.target.value.trim())} inputMode="numeric" placeholder={zh ? "你的 agentId" : "your agentId"} />
-          {agentId !== undefined ? (
-            owner.data ? (
-              <span className="hint">{zh ? "所有者 " : "Owner "}<Addr a={owner.data as string} n={4} />{zh ? "。只有它或其代理钱包能为该 agentId 铸造。" : ". Only it or its agent wallet can mine for this agentId."}</span>
-            ) : owner.isError ? (
-              <span className="err">{zh ? "注册表中没有这个 agentId。" : "This agentId is not in the registry."}</span>
-            ) : null
+          <label>{zh ? "你的 .ai 名称（可选，查看剩余额度）" : "Your .ai name (optional, shows your allowance)"}</label>
+          <input value={who} onChange={(e) => setWho(e.target.value)} placeholder={zh ? "例如 nemo.ai 或钱包地址" : "e.g. nemo.ai or a wallet address"} />
+          {agentArg && q.data?.agent ? (
+            q.data.agent.handle ? (
+              <span className="hint">
+                {q.data.agent.handle} · <Addr a={q.data.agent.wallet} n={4} />
+                {q.data.agent.remainingThisEpoch !== null ? <> · {zh ? "本纪元剩余" : "left this epoch"} <b>{compact(BigInt(q.data.agent.remainingThisEpoch))} YAN</b></> : null}
+              </span>
+            ) : (
+              <span className="err">{zh ? "这个钱包没有 .ai Agent ID，合约会拒绝。" : "This wallet holds no .ai Agent ID; the contract will reject it."}</span>
+            )
+          ) : agentMissing ? (
+            <span className="err">{zh ? "没有找到这个 .ai 名称。" : "No such .ai name."}</span>
           ) : null}
         </div>
         <div className="kvl">
           <div><span>{zh ? "约合" : "Worth"}</span><b>{ok && usd !== undefined ? `${fmt(usd, 18, 2)} USD` : "—"}</b></div>
-          <div><span>{zh ? "可铸造" : "Mints"}</span><b>{ok ? `${fmt(q.data as bigint | undefined, 18, 0)} YAN` : "—"}</b></div>
+          <div><span>{zh ? "可铸造" : "Mints"}</span><b>{ok && tokens !== undefined ? `${fmt(tokens, 18, 0)} YAN` : "—"}</b></div>
+          <div><span>{zh ? "推理额度" : "Inference credit"}</span><b>{ok && usd !== undefined ? `${fmt(usd, 18, 2)} USD` : "—"}</b></div>
           <div><span>BNB / USD</span><b>{fmt(p.bnbUsd, 18, 2)}</b></div>
           <div><span>{t("s_rate")}</span><b>{fmt(p.tokensPerUsd, 18, 0)} YAN/USD</b></div>
           <div><span>{zh ? "最低支付" : "Minimum"}</span><b>{minWei !== undefined ? `${fmt(minWei, 18, 5)} BNB` : "—"}</b></div>
+          <div><span>{zh ? "每个 Agent ID 每纪元上限" : "Cap per Agent ID per epoch"}</span><b>{capTokens ? `${compact(capTokens)} YAN` : zh ? "无" : "none"}</b></div>
         </div>
-        {invalid ? <p className="warn">{zh ? "请输入有效的 BNB 数量。" : "Enter a valid BNB amount."}</p> : null}
+        {!valid && bnb !== "" ? <p className="warn">{zh ? "请输入有效的 BNB 数量。" : "Enter a valid BNB amount."}</p> : null}
         {belowMin ? <p className="warn">{zh ? "低于 1 美元的最低支付，合约会拒绝。" : "Below the $1 minimum; the contract will reject it."}</p> : null}
-        {overCap ? <p className="warn">{zh ? "超过剩余可铸造量，多付部分不会铸造。" : "Exceeds the cost to cap; the excess mints nothing."}</p> : null}
+        {overAgentCap ? <p className="warn">{zh ? "超过这个 Agent ID 本纪元的剩余额度，请减少金额。" : "More than this Agent ID can still mint this epoch; lower the amount."}</p> : null}
       </Panel>
 
       <div>
-        <Code label={zh ? "MCP · 让智能体执行" : "MCP · ask the agent"}>{mcpCall}</Code>
-        <Code label={zh ? "交易 · 直接发送" : "Transaction · send directly"}>{castCmd}</Code>
+        <Code label={zh ? "复制给你的币安智能体" : "Paste into your Binance agent"}>{prompt}</Code>
+        <Code label={zh ? "高级 · 原始交易" : "Advanced · raw transaction"}>{raw}</Code>
         <p className="hint" style={{ marginTop: 12 }}>
           {ok
             ? zh
-              ? `指令已按 ${bnb} BNB 生成。只有该 agentId 的所有者或代理钱包能调用，其它地址会被合约拒绝。网站从不接触密钥。`
-              : `Commands are filled for ${bnb} BNB. Only the agentId's owner or agent wallet can call; any other address is rejected by the contract. This site never touches a key.`
+              ? `已按 ${bnb} BNB 生成。只有持有 .ai Agent ID 的钱包能铸造，其它钱包会被合约拒绝、BNB 原路不动。网站从不接触钱包。`
+              : `Filled for ${bnb} BNB. Only wallets holding a .ai Agent ID can mint; any other wallet is rejected by the contract and keeps its BNB. This site never touches a wallet.`
             : zh
               ? "先在左边选择有效金额，指令会自动填入。"
-              : "Choose a valid amount on the left and the commands fill in."}
+              : "Choose a valid amount on the left and the prompt fills in."}
         </p>
       </div>
     </div>
@@ -107,76 +122,41 @@ function MintPlanner() {
 function Steps() {
   const { lang } = useT();
   const zh = lang === "zh";
-  const d = deployment!;
-  const gw = GATEWAY || "https://api.yansuan.io";
-  const mcp = `{
-  "mcpServers": {
-    "yansuan": {
-      "command": "bun",
-      "args": ["<repo>/gateway/src/mcp.ts"],
-      "env": {
-        "AGENT_PRIVATE_KEY": "0x…",
-        "AGENT_ID": "<agentId>",
-        "GATEWAY_URL": "${gw}",
-        "CHAIN_ID": "${CHAIN_ID}",
-        "RPC_URL": "${rpcUrl()}",
-        "POI_ADDRESS": "${d.proofOfInference}",
-        "TOKEN_ADDRESS": "${d.token}",
-        "STAKE_ADDRESS": "${d.stake}",
-        "REGISTRY_ADDRESS": "${d.registry}"
-      }
-    }
-  }
-}`;
   return (
     <>
       <div className="g3">
         <div>
           <div className="no">{zh ? "壹" : "I"}</div>
-          <h3>{zh ? "装上工具" : "Install the tools"}</h3>
-          <p>
-            {zh
-              ? "克隆仓库，把衍算 MCP 服务加入智能体配置。密钥只存在智能体自己的运行环境里，网站从不接触。"
-              : "Clone the repo and add the Yansuan MCP server to the agent's config. The key lives only in the agent's own runtime; this site never touches it."}
-          </p>
+          <h3>{zh ? "领取 .ai 身份" : "Claim a .ai identity"}</h3>
+          <p>{zh ? "打开币安 App：钱包 → Web3 钱包 → Agent ID，免费领取你的 .ai 名称，并开通 Agentic Wallet。" : "In the Binance app: Wallet → Web3 wallet → Agent ID. Claim your free .ai name and turn on the Agentic Wallet."}</p>
         </div>
         <div>
           <div className="no">{zh ? "贰" : "II"}</div>
-          <h3>{zh ? "注册身份" : "Register an identity"}</h3>
-          <p>
-            {zh ? "智能体调用 " : "The agent calls "}
-            <code>yansuan_register</code>
-            {zh ? "，在 ERC-8004 身份注册表获得 agentId，写回配置的 AGENT_ID。只需一次。" : " to get an agentId from the ERC-8004 Identity Registry, then sets AGENT_ID. Once."}
-          </p>
+          <h3>{zh ? "接上你的 AI" : "Connect your AI"}</h3>
+          <p>{zh ? "在 Claude、ChatGPT 或其它智能体里安装币安官方技能，并在 Agentic Wallet 设置里打开开发者模式。" : "Install Binance's official skill in Claude, ChatGPT or any agent, then turn on Developer Mode in the Agentic Wallet settings."}</p>
         </div>
         <div>
           <div className="no">{zh ? "叁" : "III"}</div>
-          <h3>{zh ? "支付即铸造" : "Pay, and it mints"}</h3>
-          <p>
-            {zh ? "智能体以任意金额调用 " : "The agent calls "}
-            <code>yansuan_mine</code>
-            {zh ? "（不低于 1 美元）。一笔交易，无需授权。YAN 铸给智能体，额度记在 agentId，随后 " : " with any amount of at least $1. One transaction, no approval. YAN goes to the agent, credit to its agentId, then "}
-            <code>yansuan_infer</code>
-            {zh ? " 消费额度。" : " spends it."}
-          </p>
+          <h3>{zh ? "粘贴，确认" : "Paste, confirm"}</h3>
+          <p>{zh ? "把上面的指令粘贴给智能体。它会检查身份与额度、预览交易，你确认后完成铸造。BNB 留在你自己的钱包里，直到你确认。" : "Paste the prompt above into the agent. It checks your identity and allowance, previews the transaction, and mints after you confirm. Your BNB stays in your wallet until then."}</p>
         </div>
       </div>
       <div style={{ marginTop: 32 }}>
-        <Code label={zh ? "MCP 配置" : "MCP config"}>{mcp}</Code>
+        <Code label={zh ? "安装币安 Agentic Wallet 技能" : "Install the Binance Agentic Wallet skill"}>{SKILL}</Code>
         <p className="hint" style={{ marginTop: 10 }}>
-          <a href={REPO} target="_blank" rel="noreferrer">{REPO.replace("https://", "")}</a> · <Link to="/docs">{zh ? "完整接入文档" : "full integration docs"}</Link>
+          <Link to="/docs">{zh ? "完整接入文档：铸造、额度、网关" : "Full docs: minting, credit, gateway"}</Link>
         </p>
       </div>
     </>
   );
 }
 
+const agentLabel = (handle: string, wallet: string) => (handle ? `${handle}.ai` : `${wallet.slice(0, 6)}…${wallet.slice(-4)}`);
+
 export default function Mine() {
   const { t, lang } = useT();
   const zh = lang === "zh";
   const mining = useMining();
-  const lb = mining.rows;
-  const feed = mining.feed;
   if (!deployment) return <div className="wrap notice">No deployment for this chain.</div>;
 
   return (
@@ -184,14 +164,14 @@ export default function Mine() {
       <section className="sec" style={{ paddingTop: 56 }}>
         <SecHead
           no="一"
-          h={zh ? "计算并铸造" : "Calculate and mint"}
-          p={zh ? "先选金额，看清能铸多少，再把指令交给你的智能体。网站不连接钱包。" : "Pick an amount, see what it mints, then hand the command to your agent. This site never connects a wallet."}
+          h={zh ? "让你的 .ai 智能体铸造" : "Mint with your .ai agent"}
+          p={zh ? "选好金额，复制指令，交给你的币安智能体。网站不连接钱包，只有持有 .ai Agent ID 的智能体能铸造。" : "Pick an amount, copy the prompt, hand it to your Binance agent. This site never connects a wallet; only agents holding a .ai Agent ID can mint."}
         />
-        <MintPlanner />
+        <PromptBuilder />
       </section>
 
       <section className="sec">
-        <SecHead no="二" h={zh ? "接入你的智能体" : "Connect your agent"} p={zh ? "铸造只发生在智能体自己的运行环境里。" : "Minting happens only inside the agent's own runtime."} />
+        <SecHead no="二" h={zh ? "第一次？三步" : "First time? Three steps"} />
         <Steps />
       </section>
 
@@ -203,11 +183,11 @@ export default function Mine() {
               <table>
                 <thead><tr><th>{t("lb_rank")}</th><th>{t("lb_agent")}</th><th className="num">{t("lb_mined")}</th><th className="num">{t("lb_paid")}</th><th className="num">{t("lb_txs")}</th></tr></thead>
                 <tbody>
-                  {lb.length === 0 ? <tr><td colSpan={5} className="empty">{mining.loading ? t("loading") : t("none")}</td></tr> : null}
-                  {lb.slice(0, 50).map((r, i) => (
-                    <tr key={r.agentId.toString()}>
+                  {mining.rows.length === 0 ? <tr><td colSpan={5} className="empty">{mining.loading ? t("loading") : t("none")}</td></tr> : null}
+                  {mining.rows.slice(0, 50).map((r, i) => (
+                    <tr key={r.agent}>
                       <td className="mono">{i + 1}</td>
-                      <td><Link to={`/agent/${r.agentId}`} className="mono">#{r.agentId.toString()}</Link></td>
+                      <td><Link to={`/agent/${r.handle ? `${r.handle}.ai` : r.agent}`} className="mono">{agentLabel(r.handle, r.agent)}</Link></td>
                       <td className="num">{compact(r.tokens)}</td>
                       <td className="num">{fmt(r.usd, 18, 2)}</td>
                       <td className="num">{r.txs}</td>
@@ -223,10 +203,10 @@ export default function Mine() {
               <table>
                 <thead><tr><th>{t("f_agent")}</th><th className="num">BNB</th><th className="num">{t("f_tokens")}</th><th>{t("f_tx")}</th></tr></thead>
                 <tbody>
-                  {feed.length === 0 ? <tr><td colSpan={4} className="empty">{mining.loading ? t("loading") : t("none")}</td></tr> : null}
-                  {feed.map((e) => (
-                    <tr key={e.tx + e.agentId.toString()}>
-                      <td><Link to={`/agent/${e.agentId}`} className="mono">#{e.agentId.toString()}</Link></td>
+                  {mining.feed.length === 0 ? <tr><td colSpan={4} className="empty">{mining.loading ? t("loading") : t("none")}</td></tr> : null}
+                  {mining.feed.map((e) => (
+                    <tr key={e.tx + e.agent}>
+                      <td><Link to={`/agent/${e.handle ? `${e.handle}.ai` : e.agent}`} className="mono">{agentLabel(e.handle, e.agent)}</Link></td>
                       <td className="num">{fmt(e.wei, 18, 4)}</td>
                       <td className="num">{compact(e.tokens)}</td>
                       <td><Addr a={e.tx} n={4} kind="tx" /></td>
@@ -235,7 +215,6 @@ export default function Mine() {
                 </tbody>
               </table>
             </div>
-            {feed.length ? <p className="hint" style={{ marginTop: 8 }}>{zh ? "区块 " : "Block "}{feed[0].block.toString()} · {short(feed[0].miner)}</p> : null}
           </div>
         </div>
       </section>

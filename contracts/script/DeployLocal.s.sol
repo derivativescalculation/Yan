@@ -6,23 +6,22 @@ import {SuanToken} from "../src/SuanToken.sol";
 import {ProofOfInference} from "../src/ProofOfInference.sol";
 import {BuybackBurner} from "../src/BuybackBurner.sol";
 import {SuanStake} from "../src/SuanStake.sol";
-import {MockRegistry} from "../src/mocks/MockRegistry.sol";
+import {MockAgentIdRegistry} from "../src/mocks/MockAgentIdRegistry.sol";
 import {MockRouter} from "../src/mocks/MockRouter.sol";
 import {MockAggregator} from "../src/mocks/MockAggregator.sol";
 
-/// Local anvil stack with a mock price feed ($700/BNB), registry and router.
-/// Registers agent #1 for the deployer.
+/// Local anvil stack: mock price feed ($700/BNB), mock Agent ID registry, mock router.
+/// Gives the deployer (anvil account 0) the handle "genesis".
 contract DeployLocal is Script {
     struct Out {
         address feed;
-        address reg;
+        address ids;
         address router;
         address token;
         address burner;
         address poi;
         address stakeC;
         address deployer;
-        uint256 agentId;
     }
 
     function run() external {
@@ -32,23 +31,35 @@ contract DeployLocal is Script {
         vm.startBroadcast(pk);
         o = _deploy(o);
         vm.stopBroadcast();
-        console.log("agentId", o.agentId);
         _write(o);
     }
 
     function _deploy(Out memory o) internal returns (Out memory) {
         o.feed = address(new MockAggregator(700e8, 8));
-        o.reg = address(new MockRegistry());
+        o.ids = address(new MockAgentIdRegistry());
         o.router = address(new MockRouter(address(0xB4B)));
         address predicted = vm.computeCreateAddress(o.deployer, vm.getNonce(o.deployer) + 2);
         o.token = address(new SuanToken("Yansuan", "YAN", predicted));
         o.burner = address(new BuybackBurner(o.token, o.router, 5e18, o.deployer));
-        o.poi = address(
-            new ProofOfInference(o.token, o.feed, 365 days, o.reg, o.deployer, o.burner, 2000, 40_000e18, 7000, 1e18, 1000, o.deployer)
-        );
+        ProofOfInference.Config memory c = ProofOfInference.Config({
+            token: o.token,
+            priceFeed: o.feed,
+            maxPriceAge: 365 days,
+            agentIds: o.ids,
+            opsTreasury: o.deployer,
+            burner: o.burner,
+            burnBps: 2000,
+            initialTokensPerUsd: 40_000e18,
+            decayBps: 7000,
+            minPaymentUsd: 1e18,
+            redeemBps: 1000,
+            maxPerAgentPerEpoch: 1_000_000e18,
+            owner: o.deployer
+        });
+        o.poi = address(new ProofOfInference(c));
         require(o.poi == predicted, "minter prediction failed");
         o.stakeC = address(new SuanStake(o.token));
-        o.agentId = MockRegistry(o.reg).register("http://localhost/agent.json");
+        MockAgentIdRegistry(o.ids).setHandle(o.deployer, "genesis");
         return o;
     }
 
@@ -62,11 +73,12 @@ contract DeployLocal is Script {
         );
         string memory b = string.concat(
             '","priceFeed":"', vm.toString(o.feed),
-            '","registry":"', vm.toString(o.reg),
+            '","agentIds":"', vm.toString(o.ids),
             '","router":"', vm.toString(o.router),
             '","opsTreasury":"', vm.toString(o.deployer),
-            '","agentId":', vm.toString(o.agentId), '}'
+            '","maxPerAgentPerEpoch":"1000000000000000000000000"}'
         );
         vm.writeFile(string.concat("deployments/", vm.toString(block.chainid), ".json"), string.concat(a, b));
+        console.log("local stack written");
     }
 }

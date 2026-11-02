@@ -15,26 +15,15 @@ export const logsClient = createPublicClient({ chain, transport: http(env.LOGS_R
 export const POI = env.POI_ADDRESS as Address;
 export const TOKEN = env.TOKEN_ADDRESS as Address;
 export const STAKE = env.STAKE_ADDRESS as Address;
-export const REGISTRY = env.REGISTRY_ADDRESS as Address;
+export const AGENT_IDS = env.AGENT_ID_REGISTRY_ADDRESS as Address;
 
 export const poiAbi = PoiAbi as any;
 export const stakeAbi = StakeAbi as any;
 export const tokenAbi = TokenAbi as any;
 
-export const registryAbi = parseAbi([
-  "function ownerOf(uint256 agentId) view returns (address)",
-  "function getAgentWallet(uint256 agentId) view returns (address)",
-  "function balanceOf(address owner) view returns (uint256)",
-  "function tokenURI(uint256 agentId) view returns (string)",
-  "function register(string agentURI) returns (uint256)",
-]);
-
-export const erc20Abi = parseAbi([
-  "function balanceOf(address) view returns (uint256)",
-  "function allowance(address owner, address spender) view returns (uint256)",
-  "function approve(address spender, uint256 amount) returns (bool)",
-  "function decimals() view returns (uint8)",
-  "function symbol() view returns (string)",
+export const agentIdAbi = parseAbi([
+  "function handleOf(address wallet) view returns (string)",
+  "function ownerOfHandle(string handle) view returns (address)",
 ]);
 
 // ---------------------------------------------------------------- bounded cache
@@ -50,46 +39,61 @@ async function memo<T>(key: string, ttlMs: number, fn: () => Promise<T>): Promis
   return v;
 }
 
-export async function isOperator(agentId: bigint, who: Address): Promise<boolean> {
-  try {
-    return await memo(`op:${agentId}:${who.toLowerCase()}`, 10_000, async () =>
-      (await client.readContract({ address: POI, abi: poiAbi, functionName: "isOperator", args: [agentId, who] })) as boolean,
-    );
-  } catch {
-    return false; // nonexistent agent reverts in ownerOf; RPC failure is not cached
-  }
-}
+const lc = (a: string) => a.toLowerCase();
 
-export async function creditsUsd(agentId: bigint): Promise<bigint> {
-  return memo(`credits:${agentId}`, 5_000, async () =>
-    (await client.readContract({ address: POI, abi: poiAbi, functionName: "creditsUsd", args: [agentId] })) as bigint,
+/** .ai handle (without suffix) held by `wallet`, "" if none */
+export async function handleOf(wallet: Address): Promise<string> {
+  return memo(`handle:${lc(wallet)}`, 60_000, async () =>
+    (await client.readContract({ address: AGENT_IDS, abi: agentIdAbi, functionName: "handleOf", args: [wallet] })) as string,
   );
 }
 
-export async function stakedOf(agentId: bigint): Promise<bigint> {
-  return memo(`staked:${agentId}`, 30_000, async () =>
-    (await client.readContract({ address: STAKE, abi: stakeAbi, functionName: "staked", args: [agentId] })) as bigint,
+/** wallet holding `handle` (accepts "nemo" or "nemo.ai"), null if unregistered */
+export async function walletOfHandle(handle: string): Promise<Address | null> {
+  const h = handle.toLowerCase().replace(/\.ai$/, "");
+  if (!/^[a-z0-9]{1,64}$/.test(h)) return null;
+  const a = await memo(`owner:${h}`, 60_000, async () =>
+    (await client.readContract({ address: AGENT_IDS, abi: agentIdAbi, functionName: "ownerOfHandle", args: [h] })) as Address,
+  );
+  return a && !/^0x0{40}$/i.test(a) ? a : null;
+}
+
+export async function creditsUsd(wallet: Address): Promise<bigint> {
+  return memo(`credits:${lc(wallet)}`, 5_000, async () =>
+    (await client.readContract({ address: POI, abi: poiAbi, functionName: "creditsUsd", args: [wallet] })) as bigint,
   );
 }
 
-/** true if the agent has ever mined or redeemed (cheap existence check for public endpoints) */
-export async function agentSeen(agentId: bigint): Promise<boolean> {
-  return memo(`seen:${agentId}`, 30_000, async () =>
-    (await client.readContract({ address: POI, abi: poiAbi, functionName: "seen", args: [agentId] })) as boolean,
+export async function stakedOf(wallet: Address): Promise<bigint> {
+  return memo(`staked:${lc(wallet)}`, 30_000, async () =>
+    (await client.readContract({ address: STAKE, abi: stakeAbi, functionName: "staked", args: [wallet] })) as bigint,
   );
+}
+
+export async function agentChain(wallet: Address) {
+  const poi = { address: POI, abi: poiAbi } as const;
+  const [minedBy, remaining, redeemedBy, seen] = await Promise.all([
+    client.readContract({ ...poi, functionName: "minedBy", args: [wallet] }) as Promise<bigint>,
+    client.readContract({ ...poi, functionName: "remainingThisEpoch", args: [wallet] }) as Promise<bigint>,
+    client.readContract({ ...poi, functionName: "redeemedBy", args: [wallet] }) as Promise<bigint>,
+    client.readContract({ ...poi, functionName: "seen", args: [wallet] }) as Promise<boolean>,
+  ]);
+  return { minedBy, remaining, redeemedBy, seen };
 }
 
 export interface ProtocolStats {
   chainId: number;
   totalMinted: bigint;
   totalUsdPaid: bigint;
+  totalWeiPaid: bigint;
   totalRedeemed: bigint;
   agentCount: bigint;
   currentEpoch: bigint;
   tokensPerUsd: bigint;
   costToCap: bigint;
   bnbUsd: bigint;
-  totalWeiPaid: bigint;
+  maxPerAgentPerEpoch: bigint;
+  minPaymentUsd: bigint;
   totalSupply: bigint;
   totalStaked: bigint;
   cap: bigint;
@@ -100,28 +104,38 @@ export async function stats(): Promise<ProtocolStats> {
     const poi = { address: POI, abi: poiAbi } as const;
     const rd = (c: { address: Address; abi: any; functionName: string }) =>
       client.readContract({ address: c.address, abi: c.abi, functionName: c.functionName }) as Promise<bigint>;
-    const [totalMinted, totalUsdPaid, totalRedeemed, agentCount, currentEpoch, tokensPerUsd, costToCap, totalSupply, totalStaked, cap, bnbUsd, totalWeiPaid] =
+    const [totalMinted, totalUsdPaid, totalWeiPaid, totalRedeemed, agentCount, currentEpoch, tokensPerUsd, costToCap, bnbUsd, maxPerAgentPerEpoch, minPaymentUsd, totalSupply, totalStaked, cap] =
       await Promise.all([
         rd({ ...poi, functionName: "totalMinted" }),
         rd({ ...poi, functionName: "totalUsdPaid" }),
+        rd({ ...poi, functionName: "totalWeiPaid" }),
         rd({ ...poi, functionName: "totalRedeemed" }),
         rd({ ...poi, functionName: "agentCount" }),
         rd({ ...poi, functionName: "currentEpoch" }),
         rd({ ...poi, functionName: "tokensPerUsd" }),
         rd({ ...poi, functionName: "costToCap" }),
+        rd({ ...poi, functionName: "bnbUsd" }),
+        rd({ ...poi, functionName: "maxPerAgentPerEpoch" }),
+        rd({ ...poi, functionName: "minPaymentUsd" }),
         rd({ address: TOKEN, abi: tokenAbi, functionName: "totalSupply" }),
         rd({ address: STAKE, abi: stakeAbi, functionName: "totalStaked" }),
         rd({ address: TOKEN, abi: tokenAbi, functionName: "CAP" }),
-        rd({ ...poi, functionName: "bnbUsd" }),
-        rd({ ...poi, functionName: "totalWeiPaid" }),
       ]);
-    return { chainId: env.CHAIN_ID, totalMinted, totalUsdPaid, totalRedeemed, agentCount, currentEpoch, tokensPerUsd, costToCap, totalSupply, totalStaked, cap, bnbUsd, totalWeiPaid };
+    return { chainId: env.CHAIN_ID, totalMinted, totalUsdPaid, totalWeiPaid, totalRedeemed, agentCount, currentEpoch, tokensPerUsd, costToCap, bnbUsd, maxPerAgentPerEpoch, minPaymentUsd, totalSupply, totalStaked, cap };
   });
 }
 
+export async function quote(wei: bigint): Promise<{ tokens: bigint; usd: bigint }> {
+  const [tokens, usd] = await Promise.all([
+    client.readContract({ address: POI, abi: poiAbi, functionName: "quote", args: [wei] }) as Promise<bigint>,
+    client.readContract({ address: POI, abi: poiAbi, functionName: "usdOf", args: [wei] }) as Promise<bigint>,
+  ]);
+  return { tokens, usd };
+}
+
 export interface MinedEvent {
-  agentId: bigint;
-  miner: Address;
+  agent: Address;
+  handle: string;
   usd: bigint;
   tokens: bigint;
   epochAfter: bigint;
@@ -131,7 +145,7 @@ export interface MinedEvent {
 }
 
 const minedAbi = parseAbiItem(
-  "event Mined(uint256 indexed agentId, address indexed miner, uint256 usdAmount18, uint256 tokensMinted, uint256 epochAfter, uint256 weiPaid)",
+  "event Mined(address indexed agent, string handle, uint256 usdAmount18, uint256 tokensMinted, uint256 epochAfter, uint256 weiPaid)",
 );
 
 /// Mined events since DEPLOY_BLOCK, cached and extended incrementally. Single in-flight scan.
@@ -160,7 +174,7 @@ export function minedEvents(): Promise<MinedEvent[]> {
         const fresh: MinedEvent[] = [];
         for (const l of logs) {
           const a = l.args;
-          fresh.push({ agentId: a.agentId!, miner: a.miner!, usd: a.usdAmount18!, tokens: a.tokensMinted!, epochAfter: a.epochAfter!, weiPaid: a.weiPaid!, block: l.blockNumber!, tx: l.transactionHash! });
+          fresh.push({ agent: a.agent!, handle: a.handle!, usd: a.usdAmount18!, tokens: a.tokensMinted!, epochAfter: a.epochAfter!, weiPaid: a.weiPaid!, block: l.blockNumber!, tx: l.transactionHash! });
         }
         // commit progress per window so a later failure never rescans or double-counts
         minedCache = { upTo: to, events: [...minedCache.events, ...fresh] };
@@ -176,15 +190,15 @@ export function minedEvents(): Promise<MinedEvent[]> {
 }
 
 export function leaderboard(events: MinedEvent[], limit = 50) {
-  const byAgent = new Map<string, { agentId: bigint; tokens: bigint; usd: bigint; txs: number; last: bigint }>();
+  const by = new Map<string, { agent: Address; handle: string; tokens: bigint; usd: bigint; txs: number; last: bigint }>();
   for (const e of events) {
-    const k = e.agentId.toString();
-    const row = byAgent.get(k) ?? { agentId: e.agentId, tokens: 0n, usd: 0n, txs: 0, last: 0n };
+    const k = lc(e.agent);
+    const row = by.get(k) ?? { agent: e.agent, handle: e.handle, tokens: 0n, usd: 0n, txs: 0, last: 0n };
     row.tokens += e.tokens;
     row.usd += e.usd;
     row.txs += 1;
     if (e.block > row.last) row.last = e.block;
-    byAgent.set(k, row);
+    by.set(k, row);
   }
-  return [...byAgent.values()].sort((a, b) => (b.tokens > a.tokens ? 1 : b.tokens < a.tokens ? -1 : 0)).slice(0, limit);
+  return [...by.values()].sort((a, b) => (b.tokens > a.tokens ? 1 : b.tokens < a.tokens ? -1 : 0)).slice(0, limit);
 }

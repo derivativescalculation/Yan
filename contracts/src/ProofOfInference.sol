@@ -5,71 +5,95 @@ import {Ownable2Step, Ownable} from "@openzeppelin/contracts/access/Ownable2Step
 import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import {SuanToken} from "./SuanToken.sol";
-import {IERC8004Identity} from "./interfaces/IERC8004Identity.sol";
+import {IAgentIdRegistry} from "./interfaces/IAgentIdRegistry.sol";
 import {IAggregatorV3} from "./interfaces/IAggregatorV3.sol";
 
-/// @title ProofOfInference - the only mint path for the token
-/// @notice An ERC-8004 registered agent pays BNB for inference credit. The payment is valued in USD
-///         with the Chainlink BNB/USD feed, mints tokens to the caller at the current epoch rate and
-///         books the USD value as credit on the agentId. Only the identity's owner or its registered
-///         agent wallet can call. Every EPOCH_SIZE tokens the mint rate is multiplied by
-///         decayBps/10000 (7000 = each epoch mints 30% fewer tokens per USD).
+/// @title ProofOfInference - the only mint path for YAN
+/// @notice Only wallets holding a Binance .ai Agent ID can mint. An agent pays BNB, either by calling
+///         `mine()` or by sending BNB to this contract. The payment is valued in USD with the Chainlink
+///         BNB/USD feed, mints YAN to the agent at the current epoch rate and books the USD value as
+///         inference credit on the agent's wallet.
+///
+///         Every EPOCH_SIZE tokens the mint rate is multiplied by decayBps/10000. Each Agent ID can mint
+///         at most `maxPerAgentPerEpoch` tokens per epoch (0 = no cap), so every epoch is spread across
+///         many agents. One Agent ID exists per Binance user.
 ///
 ///         BNB is split in the same transaction: burnBps to the BuybackBurner, the rest to the ops
-///         treasury (which pays model bills).
+///         treasury (which pays for the AI compute agents use).
 ///
-///         Utility: tokens are always redeemable for inference credit (`redeem`) at the genesis rate
-///         times redeemBps, constant across epochs, so the redemption liability is bounded by
-///         redeemBps of all payments.
+///         Utility: YAN is always redeemable for inference credit (`redeem`) at the genesis rate times
+///         redeemBps, constant across epochs, so the redemption liability is bounded.
 ///
-///         The owner can only pause `mine`. Rates, split, feed and destinations are immutable.
+///         The owner can only pause minting. Rates, caps, split, feed, registry and destinations are
+///         immutable.
 contract ProofOfInference is Ownable2Step, Pausable, ReentrancyGuard {
     uint256 public constant EPOCH_SIZE = 100_000_000e18; // rate steps down every 100M tokens
     uint256 public constant MAX_EPOCH = 9; // 10 epochs x 100M = 1B cap
     uint256 public constant BPS = 10_000;
 
+    struct Config {
+        address token;
+        address priceFeed;
+        uint256 maxPriceAge;
+        address agentIds;
+        address opsTreasury;
+        address burner;
+        uint256 burnBps;
+        uint256 initialTokensPerUsd;
+        uint256 decayBps;
+        uint256 minPaymentUsd;
+        uint256 redeemBps;
+        uint256 maxPerAgentPerEpoch;
+        address owner;
+    }
+
     SuanToken public immutable token;
     IAggregatorV3 public immutable priceFeed;
     uint256 public immutable feedScale; // 10 ** feed decimals
     uint256 public immutable maxPriceAge; // seconds
-    IERC8004Identity public immutable registry;
+    IAgentIdRegistry public immutable agentIds;
     address public immutable opsTreasury;
     address public immutable burner;
     uint256 public immutable burnBps;
     /// @notice tokens (1e18) minted per 1 USD (1e18) in epoch 0
     uint256 public immutable initialTokensPerUsd;
-    /// @notice per-epoch rate multiplier in bps (7000 = x0.7 each epoch, 5000 = halving)
+    /// @notice per-epoch rate multiplier in bps (7000 = x0.7 each epoch)
     uint256 public immutable decayBps;
     /// @notice smallest accepted payment, in 1e18 USD
     uint256 public immutable minPaymentUsd;
     /// @notice share of genesis mint value credited when redeeming tokens for compute
     uint256 public immutable redeemBps;
+    /// @notice max tokens one Agent ID can mint within one epoch (0 = unlimited)
+    uint256 public immutable maxPerAgentPerEpoch;
 
-    /// @notice cumulative USD credit (1e18) per agentId. The gateway meters usage off-chain against this.
-    mapping(uint256 agentId => uint256 usd) public creditsUsd;
-    /// @notice cumulative tokens mined per agentId (leaderboard)
-    mapping(uint256 agentId => uint256 amount) public minedByAgent;
-    mapping(uint256 agentId => uint256 amount) public redeemedByAgent;
+    /// @notice cumulative USD credit (1e18) per wallet; the gateway meters usage off-chain against this
+    mapping(address wallet => uint256 usd) public creditsUsd;
+    /// @notice cumulative tokens mined per agent wallet
+    mapping(address wallet => uint256 amount) public minedBy;
+    /// @notice tokens mined per agent wallet per epoch (for the per-agent cap)
+    mapping(address wallet => mapping(uint256 epoch => uint256 amount)) public minedInEpoch;
+    mapping(address wallet => uint256 amount) public redeemedBy;
     uint256 public totalUsdPaid;
     uint256 public totalWeiPaid;
     uint256 public totalMinted;
     uint256 public totalRedeemed;
     uint256 public agentCount;
-    mapping(uint256 agentId => bool) public seen;
+    mapping(address wallet => bool) public seen;
 
     event Mined(
-        uint256 indexed agentId,
-        address indexed miner,
+        address indexed agent,
+        string handle,
         uint256 usdAmount18,
         uint256 tokensMinted,
         uint256 epochAfter,
         uint256 weiPaid
     );
-    event Redeemed(uint256 indexed agentId, address indexed redeemer, uint256 tokensBurned, uint256 creditUsd18);
+    event Redeemed(address indexed wallet, uint256 tokensBurned, uint256 creditUsd18);
 
-    error NotAgentOperator(uint256 agentId, address caller);
+    error NotAnAgent(address caller);
     error BelowMinimum();
     error CapReached();
+    error AgentEpochCap(uint256 remaining);
     error ZeroAddress();
     error BadBps();
     error BadRate();
@@ -78,39 +102,37 @@ contract ProofOfInference is Ownable2Step, Pausable, ReentrancyGuard {
     error ZeroAmount();
     error TransferFailed();
 
-    constructor(
-        address token_,
-        address priceFeed_,
-        uint256 maxPriceAge_,
-        address registry_,
-        address opsTreasury_,
-        address burner_,
-        uint256 burnBps_,
-        uint256 initialTokensPerUsd_,
-        uint256 decayBps_,
-        uint256 minPaymentUsd_,
-        uint256 redeemBps_,
-        address owner_
-    ) Ownable(owner_) {
+    constructor(Config memory c) Ownable(c.owner) {
         if (
-            token_ == address(0) || priceFeed_ == address(0) || registry_ == address(0) || opsTreasury_ == address(0)
-                || burner_ == address(0)
+            c.token == address(0) || c.priceFeed == address(0) || c.agentIds == address(0)
+                || c.opsTreasury == address(0) || c.burner == address(0)
         ) revert ZeroAddress();
-        if (burnBps_ >= BPS || redeemBps_ > BPS || decayBps_ == 0 || decayBps_ >= BPS) revert BadBps();
-        if (initialTokensPerUsd_ == 0 || minPaymentUsd_ == 0 || maxPriceAge_ == 0) revert BadRate();
-        uint8 dec = IAggregatorV3(priceFeed_).decimals();
-        token = SuanToken(token_);
-        priceFeed = IAggregatorV3(priceFeed_);
-        feedScale = 10 ** dec;
-        maxPriceAge = maxPriceAge_;
-        registry = IERC8004Identity(registry_);
-        opsTreasury = opsTreasury_;
-        burner = burner_;
-        burnBps = burnBps_;
-        initialTokensPerUsd = initialTokensPerUsd_;
-        decayBps = decayBps_;
-        minPaymentUsd = minPaymentUsd_;
-        redeemBps = redeemBps_;
+        if (c.burnBps >= BPS || c.redeemBps > BPS || c.decayBps == 0 || c.decayBps >= BPS) revert BadBps();
+        if (c.initialTokensPerUsd == 0 || c.minPaymentUsd == 0 || c.maxPriceAge == 0) revert BadRate();
+        token = SuanToken(c.token);
+        priceFeed = IAggregatorV3(c.priceFeed);
+        feedScale = 10 ** IAggregatorV3(c.priceFeed).decimals();
+        maxPriceAge = c.maxPriceAge;
+        agentIds = IAgentIdRegistry(c.agentIds);
+        opsTreasury = c.opsTreasury;
+        burner = c.burner;
+        burnBps = c.burnBps;
+        initialTokensPerUsd = c.initialTokensPerUsd;
+        decayBps = c.decayBps;
+        minPaymentUsd = c.minPaymentUsd;
+        redeemBps = c.redeemBps;
+        maxPerAgentPerEpoch = c.maxPerAgentPerEpoch;
+    }
+
+    // ---------------------------------------------------------------- identity
+
+    /// @notice the .ai handle of `wallet` (without suffix), empty if it holds no Agent ID
+    function handleOf(address wallet) public view returns (string memory) {
+        return agentIds.handleOf(wallet);
+    }
+
+    function isAgent(address wallet) public view returns (bool) {
+        return bytes(agentIds.handleOf(wallet)).length != 0;
     }
 
     // ---------------------------------------------------------------- price
@@ -173,35 +195,58 @@ contract ProofOfInference is Ownable2Step, Pausable, ReentrancyGuard {
         (tokens,) = _emission(usd18, totalMinted);
     }
 
+    /// @notice tokens `wallet` may still mint in the current epoch (type(uint256).max when uncapped)
+    function remainingThisEpoch(address wallet) public view returns (uint256) {
+        if (maxPerAgentPerEpoch == 0) return type(uint256).max;
+        uint256 used = minedInEpoch[wallet][currentEpoch()];
+        return used >= maxPerAgentPerEpoch ? 0 : maxPerAgentPerEpoch - used;
+    }
+
     /// @notice USD credit (1e18) that burning `tokens` grants. Constant: genesis rate x redeemBps.
     function quoteRedeem(uint256 tokens) public view returns (uint256 usd18) {
         usd18 = tokens * 1e18 / initialTokensPerUsd * redeemBps / BPS;
     }
 
-    function isOperator(uint256 agentId, address who) public view returns (bool) {
-        return registry.ownerOf(agentId) == who || registry.getAgentWallet(agentId) == who;
-    }
-
     // ---------------------------------------------------------------- mining
 
-    /// @notice Pay BNB for inference credit on `agentId`. Caller must be the agent's owner or its
-    ///         registered wallet. Mints tokens to the caller.
-    function mine(uint256 agentId) external payable whenNotPaused nonReentrant returns (uint256 minted) {
-        if (!isOperator(agentId, msg.sender)) revert NotAgentOperator(agentId, msg.sender);
+    /// @notice Pay BNB for inference credit; mints YAN to the caller. Caller must hold a .ai Agent ID.
+    function mine() external payable returns (uint256 minted) {
+        return _mine();
+    }
+
+    /// @notice Sending BNB straight to this contract mines for the sender.
+    receive() external payable {
+        _mine();
+    }
+
+    function _mine() internal whenNotPaused nonReentrant returns (uint256 minted) {
+        string memory handle = agentIds.handleOf(msg.sender);
+        if (bytes(handle).length == 0) revert NotAnAgent(msg.sender);
         uint256 usd18 = usdOf(msg.value);
         if (usd18 < minPaymentUsd) revert BelowMinimum();
 
+        uint256 epochNow = totalMinted / EPOCH_SIZE;
         uint256 epochAfter;
         (minted, epochAfter) = _emission(usd18, totalMinted);
         if (minted == 0) revert CapReached();
+        if (maxPerAgentPerEpoch != 0) {
+            uint256 used = minedInEpoch[msg.sender][epochNow];
+            if (used + minted > maxPerAgentPerEpoch) {
+                revert AgentEpochCap(used >= maxPerAgentPerEpoch ? 0 : maxPerAgentPerEpoch - used);
+            }
+        }
 
         // account before external calls
-        creditsUsd[agentId] += usd18;
-        minedByAgent[agentId] += minted;
+        minedInEpoch[msg.sender][epochNow] += minted;
+        creditsUsd[msg.sender] += usd18;
+        minedBy[msg.sender] += minted;
         totalUsdPaid += usd18;
         totalWeiPaid += msg.value;
         totalMinted += minted;
-        _touch(agentId);
+        if (!seen[msg.sender]) {
+            seen[msg.sender] = true;
+            agentCount += 1;
+        }
 
         token.mint(msg.sender, minted);
 
@@ -209,25 +254,23 @@ contract ProofOfInference is Ownable2Step, Pausable, ReentrancyGuard {
         _send(burner, toBurn);
         _send(opsTreasury, msg.value - toBurn);
 
-        emit Mined(agentId, msg.sender, usd18, minted, epochAfter, msg.value);
+        emit Mined(msg.sender, handle, usd18, minted, epochAfter, msg.value);
     }
 
-    /// @notice Burn tokens for inference credit on `agentId`. Caller must operate the agent.
-    ///         Deliberately not pausable: redemption is the token's floor utility.
-    function redeem(uint256 agentId, uint256 tokens) external nonReentrant returns (uint256 usd18) {
-        if (!isOperator(agentId, msg.sender)) revert NotAgentOperator(agentId, msg.sender);
+    /// @notice Burn YAN for inference credit on the caller's wallet. Deliberately not pausable:
+    ///         redemption is the token's floor utility. Any holder may redeem.
+    function redeem(uint256 tokens) external nonReentrant returns (uint256 usd18) {
         if (tokens == 0) revert ZeroAmount();
         usd18 = quoteRedeem(tokens);
         if (usd18 == 0) revert ZeroAmount();
 
         token.burnFrom(msg.sender, tokens);
 
-        creditsUsd[agentId] += usd18;
-        redeemedByAgent[agentId] += tokens;
+        creditsUsd[msg.sender] += usd18;
+        redeemedBy[msg.sender] += tokens;
         totalRedeemed += tokens;
-        _touch(agentId);
 
-        emit Redeemed(agentId, msg.sender, tokens, usd18);
+        emit Redeemed(msg.sender, tokens, usd18);
     }
 
     // ---------------------------------------------------------------- admin (pause only)
@@ -246,13 +289,6 @@ contract ProofOfInference is Ownable2Step, Pausable, ReentrancyGuard {
         if (amount == 0) return;
         (bool ok,) = to.call{value: amount}("");
         if (!ok) revert TransferFailed();
-    }
-
-    function _touch(uint256 agentId) internal {
-        if (!seen[agentId]) {
-            seen[agentId] = true;
-            agentCount += 1;
-        }
     }
 
     /// @dev Walk epochs: each epoch has a fixed rate; when a payment crosses a boundary the

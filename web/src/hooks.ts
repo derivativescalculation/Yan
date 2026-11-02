@@ -25,6 +25,8 @@ export function useProtocol() {
       { address: d.burner, abi: burnerAbi, functionName: "totalWeiSpent" },
       { ...poi, functionName: "bnbUsd" },
       { ...poi, functionName: "totalWeiPaid" },
+      { ...poi, functionName: "maxPerAgentPerEpoch" },
+      { ...poi, functionName: "minPaymentUsd" },
     ],
     query: { refetchInterval: 12_000 },
   });
@@ -50,19 +52,38 @@ export function useProtocol() {
     weiSpent: r(14) as bigint | undefined,
     bnbUsd: r(15) as bigint | undefined,
     totalWeiPaid: r(16) as bigint | undefined,
+    maxPerAgentPerEpoch: r(17) as bigint | undefined,
+    minPaymentUsd: r(18) as bigint | undefined,
     opsBalance: ops.data?.value,
     burnerBalance: burnerBal.data?.value,
   };
 }
 
 export const minedEvent = parseAbiItem(
-  "event Mined(uint256 indexed agentId, address indexed miner, uint256 usdAmount18, uint256 tokensMinted, uint256 epochAfter, uint256 weiPaid)",
+  "event Mined(address indexed agent, string handle, uint256 usdAmount18, uint256 tokensMinted, uint256 epochAfter, uint256 weiPaid)",
 );
 export const burnedEvent = parseAbiItem("event Burned(uint256 weiIn, uint256 tokensBurned)");
 
+export interface Mined {
+  agent: `0x${string}`;
+  handle: string;
+  usd: bigint;
+  tokens: bigint;
+  wei: bigint;
+  block: bigint;
+  tx: `0x${string}`;
+}
+
+export interface LeaderRow {
+  agent: `0x${string}`;
+  handle: string;
+  tokens: bigint;
+  usd: bigint;
+  txs: number;
+}
 
 /** eth_getLogs over [from, head] in adaptive windows (providers cap the range). */
-async function scanLogs<T>(pc: any, from: bigint, head: bigint, fetchWindow: (a: bigint, b: bigint) => Promise<T[]>): Promise<T[]> {
+async function scanLogs<T>(from: bigint, head: bigint, fetchWindow: (a: bigint, b: bigint) => Promise<T[]>): Promise<T[]> {
   const out: T[] = [];
   let step = 5_000n;
   let f = from;
@@ -80,65 +101,7 @@ async function scanLogs<T>(pc: any, from: bigint, head: bigint, fetchWindow: (a:
   return out;
 }
 
-export interface Mined {
-  agentId: bigint;
-  miner: `0x${string}`;
-  usd: bigint;
-  tokens: bigint;
-  wei: bigint;
-  block: bigint;
-  tx: `0x${string}`;
-}
-
-export interface LeaderRow {
-  agentId: bigint;
-  tokens: bigint;
-  usd: bigint;
-  txs: number;
-}
-
-/**
- * Leaderboard + recent mints. Uses the gateway's full history since the deploy block; if the gateway
- * is unreachable, falls back to on-chain logs over a recent block window (marked partial).
- */
-export function useMining(agentId?: bigint) {
-  const chainLogs = useMinedLogs(40_000n, !GATEWAY);
-  const q = useQuery({
-    queryKey: ["mining", GATEWAY, agentId?.toString() ?? "all"],
-    enabled: !!GATEWAY,
-    retry: 1,
-    refetchInterval: 15_000,
-    queryFn: async () => {
-      const url = `${GATEWAY}/v1/leaderboard${agentId !== undefined ? `?agent=${agentId}` : ""}`;
-      const r = await fetch(url);
-      if (!r.ok) throw new Error(String(r.status));
-      const j = (await r.json()) as { agents: any[]; recent: any[] };
-      const rows: LeaderRow[] = j.agents.map((a) => ({ agentId: BigInt(a.agentId), tokens: BigInt(a.tokens), usd: BigInt(a.usd), txs: Number(a.txs) }));
-      const feed: Mined[] = j.recent.map((e) => ({
-        agentId: BigInt(e.agentId),
-        miner: e.miner,
-        usd: BigInt(e.usd),
-        tokens: BigInt(e.tokens),
-        wei: BigInt(e.weiPaid ?? 0),
-        block: BigInt(e.block),
-        tx: e.tx,
-      }));
-      return { rows, feed };
-    },
-  });
-  const fallback = useMinedLogs(40_000n, !!GATEWAY && q.isError);
-  if (q.data) return { rows: q.data.rows, feed: q.data.feed, loading: false, partial: false };
-  const src = GATEWAY ? fallback : chainLogs;
-  const events = (src.data ?? []).filter((e) => agentId === undefined || e.agentId === agentId);
-  return {
-    rows: leaderboard(events),
-    feed: [...events].reverse().slice(0, 60),
-    loading: q.isLoading || src.isLoading,
-    partial: true,
-  };
-}
-
-/** Direct chain read of Mined logs over a recent block window (fallback when the gateway is down). */
+/** Direct chain read of Mined logs over a recent window (fallback when the gateway is down). */
 export function useMinedLogs(window = 40_000n, enabled = true) {
   const pc = usePublicClient();
   const d = deployment!;
@@ -149,20 +112,17 @@ export function useMinedLogs(window = 40_000n, enabled = true) {
     queryFn: async (): Promise<Mined[]> => {
       const head = await pc!.getBlockNumber();
       const from = head > window ? head - window : 0n;
-      return scanLogs<Mined>(pc, from, head, async (f, to) => {
-        const out: Mined[] = [];
+      return scanLogs<Mined>(from, head, async (f, to) => {
         const logs = await pc!.getLogs({ address: d.proofOfInference, event: minedEvent, fromBlock: f, toBlock: to });
-        for (const l of logs)
-          out.push({
-            agentId: l.args.agentId!,
-            miner: l.args.miner!,
-            usd: l.args.usdAmount18!,
-            tokens: l.args.tokensMinted!,
-            wei: l.args.weiPaid!,
-            block: l.blockNumber!,
-            tx: l.transactionHash!,
-          });
-        return out;
+        return logs.map((l) => ({
+          agent: l.args.agent!,
+          handle: l.args.handle!,
+          usd: l.args.usdAmount18!,
+          tokens: l.args.tokensMinted!,
+          wei: l.args.weiPaid!,
+          block: l.blockNumber!,
+          tx: l.transactionHash!,
+        }));
       });
     },
   });
@@ -178,7 +138,7 @@ export function useBurnLogs(window = 40_000n) {
     queryFn: async () => {
       const head = await pc!.getBlockNumber();
       const from = head > window ? head - window : 0n;
-      return scanLogs(pc, from, head, async (f, to) => {
+      return scanLogs(from, head, async (f, to) => {
         const logs = await pc!.getLogs({ address: d.burner, event: burnedEvent, fromBlock: f, toBlock: to });
         return logs.map((l) => ({ weiIn: l.args.weiIn!, tokens: l.args.tokensBurned!, block: l.blockNumber!, tx: l.transactionHash! }));
       });
@@ -186,18 +146,54 @@ export function useBurnLogs(window = 40_000n) {
   });
 }
 
-export function leaderboard(events: Mined[]) {
-  const m = new Map<string, { agentId: bigint; tokens: bigint; usd: bigint; txs: number; last: bigint }>();
+export function leaderboard(events: Mined[]): LeaderRow[] {
+  const m = new Map<string, LeaderRow>();
   for (const e of events) {
-    const k = e.agentId.toString();
-    const r = m.get(k) ?? { agentId: e.agentId, tokens: 0n, usd: 0n, txs: 0, last: 0n };
+    const k = e.agent.toLowerCase();
+    const r = m.get(k) ?? { agent: e.agent, handle: e.handle, tokens: 0n, usd: 0n, txs: 0 };
     r.tokens += e.tokens;
     r.usd += e.usd;
     r.txs += 1;
-    if (e.block > r.last) r.last = e.block;
     m.set(k, r);
   }
   return [...m.values()].sort((a, b) => (b.tokens > a.tokens ? 1 : b.tokens < a.tokens ? -1 : 0));
+}
+
+/**
+ * Leaderboard + recent mints. Uses the gateway's full history since the deploy block; if the gateway
+ * is unreachable, falls back to on-chain logs over a recent block window.
+ * `agent` may be a wallet address or a .ai name.
+ */
+export function useMining(agent?: string) {
+  const chainLogs = useMinedLogs(40_000n, !GATEWAY);
+  const q = useQuery({
+    queryKey: ["mining", GATEWAY, agent ?? "all"],
+    enabled: !!GATEWAY,
+    retry: 1,
+    refetchInterval: 15_000,
+    queryFn: async () => {
+      const r = await fetch(`${GATEWAY}/v1/leaderboard${agent ? `?agent=${encodeURIComponent(agent)}` : ""}`);
+      if (!r.ok) throw new Error(String(r.status));
+      const j = (await r.json()) as { agents: any[]; recent: any[] };
+      const rows: LeaderRow[] = j.agents.map((a) => ({ agent: a.agent, handle: a.handle, tokens: BigInt(a.tokens), usd: BigInt(a.usd), txs: Number(a.txs) }));
+      const feed: Mined[] = j.recent.map((e) => ({
+        agent: e.agent,
+        handle: e.handle,
+        usd: BigInt(e.usd),
+        tokens: BigInt(e.tokens),
+        wei: BigInt(e.weiPaid ?? 0),
+        block: BigInt(e.block),
+        tx: e.tx,
+      }));
+      return { rows, feed };
+    },
+  });
+  const fallback = useMinedLogs(40_000n, !!GATEWAY && q.isError);
+  if (q.data) return { rows: q.data.rows, feed: q.data.feed, loading: false };
+  const src = GATEWAY ? fallback : chainLogs;
+  const a = agent?.toLowerCase().replace(/\.ai$/, "");
+  const events = (src.data ?? []).filter((e) => !a || e.agent.toLowerCase() === a || e.handle === a);
+  return { rows: leaderboard(events), feed: [...events].reverse().slice(0, 60), loading: q.isLoading || src.isLoading };
 }
 
 async function gw<T>(path: string): Promise<T> {
@@ -207,29 +203,47 @@ async function gw<T>(path: string): Promise<T> {
   return r.json();
 }
 
+export interface GatewayAgent {
+  wallet: `0x${string}`;
+  handle: string | null;
+  isAgent: boolean;
+  minedBy: string;
+  remainingThisEpoch: string | null;
+  creditUsd18: string;
+  usedUsd18: string;
+  balanceUsd18: string;
+  staked: string;
+  tier: string;
+  discountBps: number;
+  rpm: number;
+  recent: { model: string; inputTokens: number; outputTokens: number; costUsd18: string; createdAt: number }[];
+}
+
+/** id: .ai name ("nemo" or "nemo.ai") or wallet address */
 export function useGatewayAgent(id?: string) {
   return useQuery({
     queryKey: ["gw-agent", id],
     enabled: !!id && !!GATEWAY,
     retry: 0,
-    queryFn: () =>
-      gw<{
-        creditUsd18: string;
-        usedUsd18: string;
-        balanceUsd18: string;
-        tier: string;
-        discountBps: number;
-        rpm: number;
-        recent: { model: string; inputTokens: number; outputTokens: number; costUsd18: string; createdAt: number }[];
-      }>(`/v1/agents/${id}`),
+    queryFn: () => gw<GatewayAgent>(`/v1/agents/${encodeURIComponent(id!)}`),
   });
 }
 
-export function useGatewayStats() {
+export interface QuoteResult {
+  usd: string;
+  tokens: string;
+  meetsMinimum: boolean;
+  agent?: { wallet: string; handle: string | null; remainingThisEpoch: string | null } | null;
+  canMine?: boolean;
+  reason?: string | null;
+}
+
+export function useQuote(bnb: string, agent?: string) {
   return useQuery({
-    queryKey: ["gw-stats"],
-    enabled: !!GATEWAY,
+    queryKey: ["quote", bnb, agent ?? ""],
+    enabled: !!GATEWAY && /^\d*\.?\d+$/.test(bnb) && Number(bnb) > 0,
     retry: 0,
-    queryFn: () => gw<{ gateway: { requests: number; usedUsd18: string; outputTokens: number } }>("/v1/stats"),
+    refetchInterval: 15_000,
+    queryFn: () => gw<QuoteResult>(`/v1/quote?bnb=${encodeURIComponent(bnb)}${agent ? `&agent=${encodeURIComponent(agent)}` : ""}`),
   });
 }
