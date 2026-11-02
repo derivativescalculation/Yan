@@ -10,13 +10,14 @@ const SITE = process.env.SITE ?? "https://yansuan.io";
 const OUT = fileURLToPath(new URL("./audit/", import.meta.url));
 fs.mkdirSync(OUT, { recursive: true });
 
-const ROUTES = ["/", "/mine", "/agent", "/agent/401787", "/treasury", "/docs", "/does-not-exist"];
+const ROUTES = ["/", "/mine", "/agent", "/agent/nemo.ai", "/treasury", "/docs", "/does-not-exist"];
 const VIEWPORTS = { desktop: { width: 1440, height: 1000 }, phone: { width: 390, height: 844 } };
 const LANGS = ["zh", "en"];
 const SUPERSEDED = [
   "0xa19cB6ef09E3a5fDc36230afd25e1044078100Fd", "0x073648Dd60402E39C332B49d76728EAE2820d2d8",
   "0x460461dBa2643b62514ad199F0746ec080752e56", "0xbED42bc64FF8B69075626402b6fa6B3b3202C52c",
   "0x7AE827a0a4254D1dA84129a624EA1D61F5D79353", "0xBA4930D6152A30b5e371720C6000CC7f218486d3",
+  "0x87dB35408C15E0360431948BD579F38FFefDe680", "0x73Dcf1e3ef87A67B8AD398eDca34a3b08B506e3F",
 ];
 const LOADING = /读取链上数据|Reading chain/;
 

@@ -148,16 +148,16 @@ The script precomputes the minter address, deploys token → burner → minter �
 
 | | BNB Chain mainnet (56) | BSC testnet (97) |
 |---|---|---|
-| YAN token | `MAINNET_TOKEN` | `0x87dB35408C15E0360431948BD579F38FFefDe680` |
-| ProofOfInference | `MAINNET_POI` | `0x73Dcf1e3ef87A67B8AD398eDca34a3b08B506e3F` |
-| BuybackBurner | `MAINNET_BURNER` | `0xA27a7E6CD43F12E650d7b7Dde236D16FC8E0ef70` |
-| SuanStake | `MAINNET_STAKE` | `0x55CeDe0fa71c161fFe7D9ccdbbfA8Eb156a76C21` |
+| YAN token | `0xB77E581DD0CC0413686Ef2C4a31B98D1627D02D2` | `0x87dB35408C15E0360431948BD579F38FFefDe680` |
+| ProofOfInference | `0x49c9B706369102309A26C0B72F215f2B3D09Db5b` | `0x73Dcf1e3ef87A67B8AD398eDca34a3b08B506e3F` |
+| BuybackBurner | `0x8496040E2102DEF78B84833236d77c0E41ef4D1E` | `0xA27a7E6CD43F12E650d7b7Dde236D16FC8E0ef70` |
+| SuanStake | `0xFB8fD15f2b71c1029f93d44a6f9870D248885d6F` | `0x55CeDe0fa71c161fFe7D9ccdbbfA8Eb156a76C21` |
 | Agent ID registry | `0x60B9262456dE011F7d15a54CdD8c48bAaa8B022F` (SPACE ID) | `0xa347BF02Df5Ce25fCDaBCE9aBaB7129c0397aF97` (mock) |
 | Chainlink BNB/USD | `0x0567F2323251f0Aab15c8dFb1967E4e8A7D42aeE` | `0x2514895c72f50D8bd4B4F9b1110F0D6bD2c97526` |
 | Ops treasury | `0x16F7e765DC66D5589bc60e8005949921E066A65E` | deployer |
-| Deploy block | `MAINNET_BLOCK` | 140390811 |
+| Deploy block | 131251463 | 140390811 |
 
-All contracts are verified on BscScan. Any other token named Yansuan or YAN is not the protocol token.
+All contracts are verified on BscScan. **The mainnet YAN token is `0xB77E581DD0CC0413686Ef2C4a31B98D1627D02D2`.** Any other token named Yansuan or YAN is not the protocol token.
 
 Superseded mainnet deployments (pre-launch iterations, not the protocol token):
 
@@ -166,7 +166,7 @@ Superseded mainnet deployments (pre-launch iterations, not the protocol token):
 | `0xa19cB6ef09E3a5fDc36230afd25e1044078100Fd` | `0x073648Dd60402E39C332B49d76728EAE2820d2d8` | USD1-settled, ERC-8004 gated; paused |
 | `0x460461dBa2643b62514ad199F0746ec080752e56` | `0xbED42bc64FF8B69075626402b6fa6B3b3202C52c` | BNB, ERC-8004 gated; has a PancakeSwap pool `0xa66cf207e0eA2436F01e20214BCB04464F2092b3`; paused |
 | `0x7AE827a0a4254D1dA84129a624EA1D61F5D79353` | `0xBA4930D6152A30b5e371720C6000CC7f218486d3` | "Yansuan Test" (YANT), integration test; paused |
-| `0x87dB35408C15E0360431948BD579F38FFefDe680` | `0x73Dcf1e3ef87A67B8AD398eDca34a3b08B506e3F` | BNB, ERC-8004 gated (mainnet) |
+| `0x87dB35408C15E0360431948BD579F38FFefDe680` | `0x73Dcf1e3ef87A67B8AD398eDca34a3b08B506e3F` | BNB, ERC-8004 gated; paused |
 
 ## Security model
 
