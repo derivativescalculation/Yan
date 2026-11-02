@@ -1,8 +1,8 @@
-import { NavLink, Link } from "react-router-dom";
+import { NavLink, Link, useLocation } from "react-router-dom";
 import { useBlockNumber } from "wagmi";
 import { useProtocol } from "../hooks";
 import { fmt, compact } from "../chain";
-import type { ReactNode } from "react";
+import { useLayoutEffect, type ReactNode } from "react";
 import { useT } from "../i18n";
 import { short, deployment, explorer, CHAIN_ID } from "../chain";
 
@@ -20,7 +20,7 @@ function Ticker() {
       <div className="wrap">
         <span><span className="live" />{chainName}</span>
         <span>BLOCK <b>{bn.data?.toString() ?? "—"}</b></span>
-        <span>{t("s_epoch").toUpperCase()} <b>{p.currentEpoch?.toString() ?? "—"} / 10</b></span>
+        <span>{t("s_epoch").toUpperCase()} <b>{p.currentEpoch === undefined ? "—" : (p.currentEpoch + 1n).toString()} / 10</b></span>
         <span>{t("s_rate").toUpperCase()} <b>{fmt(p.tokensPerUsd, 18, 0)}</b> YAN/USD</span>
         <span>{t("s_minted").toUpperCase()} <b>{compact(p.totalMinted)}</b> YAN</span>
         <span>{t("s_paid").toUpperCase()} <b>{fmt(p.totalUsdPaid, 18, 0)}</b> USD</span>
@@ -32,9 +32,15 @@ function Ticker() {
 
 export function Shell({ children }: { children: ReactNode }) {
   const { t, lang, setLang } = useT();
+  // the raffle page is a dark hall; the shell follows it (html.night in global.css)
+  const night = useLocation().pathname.startsWith("/raffle");
+  useLayoutEffect(() => {
+    document.documentElement.classList.toggle("night", night);
+  }, [night]);
   const nav = [
     ["/", t("nav_protocol")],
     ["/mine", t("nav_mine")],
+    ["/raffle", t("nav_raffle")],
     ["/agent", t("nav_agents")],
     ["/treasury", t("nav_treasury")],
     ["/docs", t("nav_docs")],
@@ -45,7 +51,7 @@ export function Shell({ children }: { children: ReactNode }) {
         <div className="wrap">
           <Link to="/" className="brand">
             <Seal />
-            衍算<small>YAN</small>
+            衍算<small>YANSUAN PROTOCOL</small>
           </Link>
           <nav className="nav">
             {nav.map(([to, label]) => (
@@ -69,7 +75,7 @@ export function Shell({ children }: { children: ReactNode }) {
         <div className="wrap">
           <div>
             <div className="brand">
-              <Seal /> 衍算
+              <Seal /> 衍算<small>YANSUAN PROTOCOL</small>
             </div>
             <p style={{ marginTop: 12, color: "var(--ink-3)", fontSize: 12, letterSpacing: "0.1em" }} className="mono">
               {t("foot_tag")}
@@ -103,8 +109,8 @@ export function Shell({ children }: { children: ReactNode }) {
             <a href="https://x.com/yansuanprotocol" target="_blank" rel="noreferrer">X · @yansuanprotocol</a>
           </div>
           <div className="legal">
-            <span className="mono">yansuan.io</span>
-            <span>© 2026 衍算</span>
+            <span className="mono">yansuan.io · Yansuan Protocol</span>
+            <span>© 2026 衍算协议 Yansuan Protocol</span>
           </div>
         </div>
       </footer>

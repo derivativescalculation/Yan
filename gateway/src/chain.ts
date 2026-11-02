@@ -1,9 +1,6 @@
-import { createPublicClient, http, parseAbi, parseAbiItem, type Address } from "viem";
+import { createPublicClient, http, parseAbi, type Address } from "viem";
 import { bsc, bscTestnet, foundry } from "viem/chains";
 import { env } from "./config";
-import PoiAbi from "./abi/ProofOfInference.json";
-import StakeAbi from "./abi/SuanStake.json";
-import TokenAbi from "./abi/SuanToken.json";
 
 export const chain =
   env.CHAIN_ID === 56 ? bsc : env.CHAIN_ID === 97 ? bscTestnet : { ...foundry, id: env.CHAIN_ID, rpcUrls: { default: { http: [env.RPC_URL] } } };
@@ -12,14 +9,61 @@ export const client = createPublicClient({ chain, transport: http(env.RPC_URL) }
 /** log scans go to an endpoint that serves eth_getLogs */
 export const logsClient = createPublicClient({ chain, transport: http(env.LOGS_RPC_URL ?? env.RPC_URL) });
 
-export const POI = env.POI_ADDRESS as Address;
+export const MINTER = env.MINTER_ADDRESS as Address;
 export const TOKEN = env.TOKEN_ADDRESS as Address;
-export const STAKE = env.STAKE_ADDRESS as Address;
+export const RAFFLE = env.RAFFLE_ADDRESS as Address;
+export const VAULT = env.VAULT_ADDRESS as Address;
 export const AGENT_IDS = env.AGENT_ID_REGISTRY_ADDRESS as Address;
 
-export const poiAbi = PoiAbi as any;
-export const stakeAbi = StakeAbi as any;
-export const tokenAbi = TokenAbi as any;
+export const minterAbi = parseAbi([
+  "function mine() payable returns (uint256)",
+  "function quote(uint256 weiAmount) view returns (uint256 total, uint256 toAgent)",
+  "function usdOf(uint256 weiAmount) view returns (uint256)",
+  "function bnbUsd() view returns (uint256)",
+  "function totalMinted() view returns (uint256)",
+  "function totalUsdPaid() view returns (uint256)",
+  "function totalWeiPaid() view returns (uint256)",
+  "function agentCount() view returns (uint256)",
+  "function currentEpoch() view returns (uint256)",
+  "function tokensPerUsd() view returns (uint256)",
+  "function costToCap() view returns (uint256)",
+  "function maxPerAgentPerEpoch() view returns (uint256)",
+  "function minPaymentUsd() view returns (uint256)",
+  "function minedBy(address) view returns (uint256)",
+  "function remainingThisEpoch(address) view returns (uint256)",
+  "function paused() view returns (bool)",
+  "event Mined(address indexed agent, string handle, uint256 usdAmount18, uint256 tokensMinted, uint256 toAgent, uint256 epochAfter, uint256 weiPaid)",
+]);
+
+export const tokenAbi = parseAbi([
+  "function totalSupply() view returns (uint256)",
+  "function balanceOf(address) view returns (uint256)",
+  "function pair() view returns (address)",
+  "event Transfer(address indexed from, address indexed to, uint256 value)",
+]);
+
+export const raffleAbi = parseAbi([
+  "function sync()",
+  "function commit(uint256 i, uint256 snapshotBlock, bytes32 root, uint256 totalTickets) returns (uint256)",
+  "function settle(uint256 id, address winner, uint256 start, uint256 count, bytes32[] proof)",
+  "function retry(uint256 id)",
+  "function pots(uint256) view returns (uint256 balance, uint256 threshold, uint16 shareBps, uint64 fullAtBlock, uint32 opened, uint64 activeDraw)",
+  "function draws(uint256) view returns (uint8 pot, uint8 status, uint64 snapshotBlock, uint64 committedAt, uint256 totalTickets, uint256 prize, uint256 requestId, uint256 random, bytes32 root, address winner)",
+  "function pending() view returns (uint256)",
+  "function paidOut() view returns (uint256)",
+  "function drawCount() view returns (uint256)",
+  "function keeper() view returns (address)",
+  "function coordinator() view returns (address)",
+  "event Synced(uint256 inflow, uint256 toJade, uint256 toCinnabar, uint256 toGold)",
+  "event PotFull(uint256 indexed pot, uint256 snapshotBlock)",
+  "event DrawCommitted(uint256 indexed id, uint256 indexed pot, uint256 snapshotBlock, bytes32 root, uint256 totalTickets, uint256 prize, uint256 requestId)",
+  "event DrawVoid(uint256 indexed id, uint256 indexed pot, uint256 snapshotBlock)",
+  "event DrawRandom(uint256 indexed id, uint256 requestId, uint256 random, uint256 winningTicket)",
+  "event DrawRetried(uint256 indexed id, uint256 requestId)",
+  "event DrawSettled(uint256 indexed id, uint256 indexed pot, address indexed winner, uint256 prize, uint256 winningTicket)",
+]);
+
+export const mockVrfAbi = parseAbi(["function fulfill(uint256 id, uint256 word)"]);
 
 export const agentIdAbi = parseAbi([
   "function handleOf(address wallet) view returns (string)",
@@ -30,7 +74,7 @@ export const agentIdAbi = parseAbi([
 
 const MAX_CACHE = 5_000;
 const cache = new Map<string, { at: number; v: unknown }>();
-async function memo<T>(key: string, ttlMs: number, fn: () => Promise<T>): Promise<T> {
+export async function memo<T>(key: string, ttlMs: number, fn: () => Promise<T>): Promise<T> {
   const hit = cache.get(key);
   if (hit && Date.now() - hit.at < ttlMs) return hit.v as T;
   const v = await fn(); // throws are not cached
@@ -43,7 +87,7 @@ const lc = (a: string) => a.toLowerCase();
 
 /** .ai handle (without suffix) held by `wallet`, "" if none */
 export async function handleOf(wallet: Address): Promise<string> {
-  return memo(`handle:${lc(wallet)}`, 60_000, async () =>
+  return memo(`handle:${lc(wallet)}`, 10 * 60_000, async () =>
     (await client.readContract({ address: AGENT_IDS, abi: agentIdAbi, functionName: "handleOf", args: [wallet] })) as string,
   );
 }
@@ -51,154 +95,86 @@ export async function handleOf(wallet: Address): Promise<string> {
 /** wallet holding `handle` (accepts "nemo" or "nemo.ai"), null if unregistered */
 export async function walletOfHandle(handle: string): Promise<Address | null> {
   const h = handle.toLowerCase().replace(/\.ai$/, "");
-  if (!/^[a-z0-9]{1,64}$/.test(h)) return null;
+  if (!/^[a-z0-9-]{1,64}$/.test(h)) return null;
   const a = await memo(`owner:${h}`, 60_000, async () =>
     (await client.readContract({ address: AGENT_IDS, abi: agentIdAbi, functionName: "ownerOfHandle", args: [h] })) as Address,
   );
   return a && !/^0x0{40}$/i.test(a) ? a : null;
 }
 
-export async function creditsUsd(wallet: Address): Promise<bigint> {
-  return memo(`credits:${lc(wallet)}`, 5_000, async () =>
-    (await client.readContract({ address: POI, abi: poiAbi, functionName: "creditsUsd", args: [wallet] })) as bigint,
-  );
+export async function pairAddress(): Promise<Address> {
+  return memo("pair", 24 * 3600_000, async () => (await client.readContract({ address: TOKEN, abi: tokenAbi, functionName: "pair" })) as Address);
 }
 
-export async function stakedOf(wallet: Address): Promise<bigint> {
-  return memo(`staked:${lc(wallet)}`, 30_000, async () =>
-    (await client.readContract({ address: STAKE, abi: stakeAbi, functionName: "staked", args: [wallet] })) as bigint,
-  );
-}
+const POT_KEYS = ["jade", "cin", "gold"] as const;
 
-export async function agentChain(wallet: Address) {
-  const poi = { address: POI, abi: poiAbi } as const;
-  const [minedBy, remaining, redeemedBy, seen] = await Promise.all([
-    client.readContract({ ...poi, functionName: "minedBy", args: [wallet] }) as Promise<bigint>,
-    client.readContract({ ...poi, functionName: "remainingThisEpoch", args: [wallet] }) as Promise<bigint>,
-    client.readContract({ ...poi, functionName: "redeemedBy", args: [wallet] }) as Promise<bigint>,
-    client.readContract({ ...poi, functionName: "seen", args: [wallet] }) as Promise<boolean>,
-  ]);
-  return { minedBy, remaining, redeemedBy, seen };
-}
-
-export interface ProtocolStats {
-  chainId: number;
-  totalMinted: bigint;
-  totalUsdPaid: bigint;
-  totalWeiPaid: bigint;
-  totalRedeemed: bigint;
-  agentCount: bigint;
-  currentEpoch: bigint;
-  tokensPerUsd: bigint;
-  costToCap: bigint;
-  bnbUsd: bigint;
-  maxPerAgentPerEpoch: bigint;
-  minPaymentUsd: bigint;
-  totalSupply: bigint;
-  totalStaked: bigint;
-  cap: bigint;
-}
-
-export async function stats(): Promise<ProtocolStats> {
-  return memo("stats", 10_000, async () => {
-    const poi = { address: POI, abi: poiAbi } as const;
-    const rd = (c: { address: Address; abi: any; functionName: string }) =>
-      client.readContract({ address: c.address, abi: c.abi, functionName: c.functionName }) as Promise<bigint>;
-    const [totalMinted, totalUsdPaid, totalWeiPaid, totalRedeemed, agentCount, currentEpoch, tokensPerUsd, costToCap, bnbUsd, maxPerAgentPerEpoch, minPaymentUsd, totalSupply, totalStaked, cap] =
+export async function stats() {
+  return memo("stats", 8_000, async () => {
+    const m = { address: MINTER, abi: minterAbi } as const;
+    const [totalMinted, totalUsdPaid, totalWeiPaid, agentCount, currentEpoch, tokensPerUsd, costToCap, bnbUsd, maxPerAgentPerEpoch, minPaymentUsd, paused, totalSupply, vaultBalance] =
       await Promise.all([
-        rd({ ...poi, functionName: "totalMinted" }),
-        rd({ ...poi, functionName: "totalUsdPaid" }),
-        rd({ ...poi, functionName: "totalWeiPaid" }),
-        rd({ ...poi, functionName: "totalRedeemed" }),
-        rd({ ...poi, functionName: "agentCount" }),
-        rd({ ...poi, functionName: "currentEpoch" }),
-        rd({ ...poi, functionName: "tokensPerUsd" }),
-        rd({ ...poi, functionName: "costToCap" }),
-        rd({ ...poi, functionName: "bnbUsd" }),
-        rd({ ...poi, functionName: "maxPerAgentPerEpoch" }),
-        rd({ ...poi, functionName: "minPaymentUsd" }),
-        rd({ address: TOKEN, abi: tokenAbi, functionName: "totalSupply" }),
-        rd({ address: STAKE, abi: stakeAbi, functionName: "totalStaked" }),
-        rd({ address: TOKEN, abi: tokenAbi, functionName: "CAP" }),
+        client.readContract({ ...m, functionName: "totalMinted" }),
+        client.readContract({ ...m, functionName: "totalUsdPaid" }),
+        client.readContract({ ...m, functionName: "totalWeiPaid" }),
+        client.readContract({ ...m, functionName: "agentCount" }),
+        client.readContract({ ...m, functionName: "currentEpoch" }),
+        client.readContract({ ...m, functionName: "tokensPerUsd" }),
+        client.readContract({ ...m, functionName: "costToCap" }),
+        client.readContract({ ...m, functionName: "bnbUsd" }).catch(() => 0n),
+        client.readContract({ ...m, functionName: "maxPerAgentPerEpoch" }),
+        client.readContract({ ...m, functionName: "minPaymentUsd" }),
+        client.readContract({ ...m, functionName: "paused" }),
+        client.readContract({ address: TOKEN, abi: tokenAbi, functionName: "totalSupply" }),
+        client.readContract({ address: TOKEN, abi: tokenAbi, functionName: "balanceOf", args: [VAULT] }),
       ]);
-    return { chainId: env.CHAIN_ID, totalMinted, totalUsdPaid, totalWeiPaid, totalRedeemed, agentCount, currentEpoch, tokensPerUsd, costToCap, bnbUsd, maxPerAgentPerEpoch, minPaymentUsd, totalSupply, totalStaked, cap };
+    return { chainId: env.CHAIN_ID, totalMinted, totalUsdPaid, totalWeiPaid, agentCount, currentEpoch, tokensPerUsd, costToCap, bnbUsd, maxPerAgentPerEpoch, minPaymentUsd, paused, totalSupply, cap: 1_000_000_000n * 10n ** 18n, vaultBalance };
   });
 }
 
-export async function quote(wei: bigint): Promise<{ tokens: bigint; usd: bigint }> {
-  const [tokens, usd] = await Promise.all([
-    client.readContract({ address: POI, abi: poiAbi, functionName: "quote", args: [wei] }) as Promise<bigint>,
-    client.readContract({ address: POI, abi: poiAbi, functionName: "usdOf", args: [wei] }) as Promise<bigint>,
+export async function pots() {
+  return memo("pots", 3_000, async () => {
+    const r = { address: RAFFLE, abi: raffleAbi } as const;
+    const [p0, p1, p2, pending, paidOut] = await Promise.all([
+      client.readContract({ ...r, functionName: "pots", args: [0n] }),
+      client.readContract({ ...r, functionName: "pots", args: [1n] }),
+      client.readContract({ ...r, functionName: "pots", args: [2n] }),
+      client.readContract({ ...r, functionName: "pending" }),
+      client.readContract({ ...r, functionName: "paidOut" }),
+    ]);
+    // YAN not yet synced is shown in the pots it will land in: 40% / 20% / the rest
+    const a = (pending * 4000n) / 10_000n, b = (pending * 2000n) / 10_000n;
+    const adds = [a, b, pending - a - b];
+    return {
+      pending,
+      paidOut,
+      pots: [p0, p1, p2].map(([balance, threshold, , fullAtBlock, opened, activeDraw], i) => ({
+        index: i,
+        key: POT_KEYS[i],
+        balance: balance + adds[i],
+        threshold,
+        opened: Number(opened),
+        fullAtBlock: Number(fullAtBlock),
+        activeDraw: Number(activeDraw),
+      })),
+    };
+  });
+}
+
+export async function quote(wei: bigint) {
+  const [[total, toAgent], usd] = await Promise.all([
+    client.readContract({ address: MINTER, abi: minterAbi, functionName: "quote", args: [wei] }),
+    client.readContract({ address: MINTER, abi: minterAbi, functionName: "usdOf", args: [wei] }),
   ]);
-  return { tokens, usd };
+  const toVault = (total * 2500n) / 10_000n;
+  return { total, toAgent, toVault, toRaffle: total - toAgent - toVault, usd };
 }
 
-export interface MinedEvent {
-  agent: Address;
-  handle: string;
-  usd: bigint;
-  tokens: bigint;
-  epochAfter: bigint;
-  weiPaid: bigint;
-  block: bigint;
-  tx: `0x${string}`;
-}
-
-const minedAbi = parseAbiItem(
-  "event Mined(address indexed agent, string handle, uint256 usdAmount18, uint256 tokensMinted, uint256 epochAfter, uint256 weiPaid)",
-);
-
-/// Mined events since DEPLOY_BLOCK, cached and extended incrementally. Single in-flight scan.
-let minedCache: { upTo: bigint; events: MinedEvent[] } = { upTo: env.DEPLOY_BLOCK > 0n ? env.DEPLOY_BLOCK - 1n : 0n, events: [] };
-let scanning: Promise<MinedEvent[]> | null = null;
-
-export function minedEvents(): Promise<MinedEvent[]> {
-  if (scanning) return scanning;
-  scanning = (async () => {
-    try {
-      const head = await logsClient.getBlockNumber();
-      if (head <= minedCache.upTo) return minedCache.events;
-      // adaptive window: start wide, halve on a provider rejection, grow back after successes
-      let step = 5_000n;
-      let from = minedCache.upTo + 1n;
-      while (from <= head) {
-        const to = from + step - 1n > head ? head : from + step - 1n;
-        let logs;
-        try {
-          logs = await logsClient.getLogs({ address: POI, event: minedAbi, fromBlock: from, toBlock: to });
-        } catch (e) {
-          if (step <= 100n) throw e;
-          step /= 2n;
-          continue;
-        }
-        const fresh: MinedEvent[] = [];
-        for (const l of logs) {
-          const a = l.args;
-          fresh.push({ agent: a.agent!, handle: a.handle!, usd: a.usdAmount18!, tokens: a.tokensMinted!, epochAfter: a.epochAfter!, weiPaid: a.weiPaid!, block: l.blockNumber!, tx: l.transactionHash! });
-        }
-        // commit progress per window so a later failure never rescans or double-counts
-        minedCache = { upTo: to, events: [...minedCache.events, ...fresh] };
-        from = to + 1n;
-        if (step < 5_000n) step *= 2n;
-      }
-      return minedCache.events;
-    } finally {
-      scanning = null;
-    }
-  })();
-  return scanning;
-}
-
-export function leaderboard(events: MinedEvent[], limit = 50) {
-  const by = new Map<string, { agent: Address; handle: string; tokens: bigint; usd: bigint; txs: number; last: bigint }>();
-  for (const e of events) {
-    const k = lc(e.agent);
-    const row = by.get(k) ?? { agent: e.agent, handle: e.handle, tokens: 0n, usd: 0n, txs: 0, last: 0n };
-    row.tokens += e.tokens;
-    row.usd += e.usd;
-    row.txs += 1;
-    if (e.block > row.last) row.last = e.block;
-    by.set(k, row);
-  }
-  return [...by.values()].sort((a, b) => (b.tokens > a.tokens ? 1 : b.tokens < a.tokens ? -1 : 0)).slice(0, limit);
+export async function agentReads(wallet: Address) {
+  const m = { address: MINTER, abi: minterAbi } as const;
+  const [minedBy, remaining, balance] = await Promise.all([
+    client.readContract({ ...m, functionName: "minedBy", args: [wallet] }),
+    client.readContract({ ...m, functionName: "remainingThisEpoch", args: [wallet] }),
+    client.readContract({ address: TOKEN, abi: tokenAbi, functionName: "balanceOf", args: [wallet] }),
+  ]);
+  return { minedBy, remaining, balance };
 }

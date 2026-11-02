@@ -8,36 +8,33 @@ const Env = z.object({
   RPC_URL: z.string().default("https://bsc-testnet-rpc.publicnode.com"),
   /// RPC used for eth_getLogs scans (the official BNB dataseed endpoints refuse log queries)
   LOGS_RPC_URL: z.string().optional(),
-  POI_ADDRESS: addr,
+  PUBLIC_URL: z.string().default("http://localhost:8787"),
+  MINTER_ADDRESS: addr,
   TOKEN_ADDRESS: addr,
-  STAKE_ADDRESS: addr,
+  RAFFLE_ADDRESS: addr,
+  VAULT_ADDRESS: addr,
   /// Binance .ai Agent ID registry (SPACE ID); mainnet 0x60B9262456dE011F7d15a54CdD8c48bAaa8B022F
   AGENT_ID_REGISTRY_ADDRESS: addr,
+  /// left out of every ticket list, together with the protocol contracts, the pair and the keeper
+  TREASURY_ADDRESS: addr,
+  DEPLOYER_ADDRESS: addr,
+  EXCLUDED_ADDRESSES: z.string().default(""),
   /// block the contracts were deployed at; required on 56/97 so the event scan is complete
   DEPLOY_BLOCK: z.coerce.bigint().default(0n),
-  /// Postgres (Neon). Required outside the local anvil chain: usage must survive restarts.
-  DATABASE_URL: z.string().optional(),
-  LEDGER_PATH: z.string().default("./ledger.sqlite"),
-  /// HMAC secret for login session tokens (32+ random bytes). Required outside the local chain.
-  SESSION_SECRET: z.string().optional(),
-  /// markup over raw model cost, in bps. Solvency: (1-burn)*(1+markup*(1-maxDiscount)) >= 1+redeem,
-  /// checked at startup against BURN_BPS / REDEEM_BPS below.
-  MARKUP_BPS: z.coerce.number().default(7500),
-  BURN_BPS: z.coerce.number().default(2000),
-  REDEEM_BPS: z.coerce.number().default(1000),
-  /// max concurrent in-flight requests per wallet (reservations are held for each)
-  MAX_INFLIGHT: z.coerce.number().default(4),
-  DEFAULT_MODEL: z.string().default("claude-opus-5-5"),
-  PUBLIC_URL: z.string().default("http://localhost:8787"),
+  /// blocks the indexer stays behind the head
+  CONFIRMATIONS: z.coerce.bigint().default(3n),
+  /// ticket balances are the lowest balance over this many seconds before the snapshot
+  TICKET_WINDOW_SEC: z.coerce.number().default(3600),
+  /// when set, this process also runs the raffle keeper (sync, commit, settle, retry)
+  KEEPER_PRIVATE_KEY: z.preprocess((v) => (v === "" ? undefined : v), z.string().regex(/^0x[0-9a-fA-F]{64}$/).optional()),
+  KEEPER_INTERVAL_MS: z.coerce.number().default(15_000),
 });
 
 export const env = Env.parse(process.env);
 export type Env = z.infer<typeof Env>;
 
-/** The HTTP gateway needs a persistent ledger, a complete event scan and a session secret. */
+export const TICKET_UNIT = 10_000n * 10n ** 18n;
+
 export function assertServerConfig() {
-  const local = env.CHAIN_ID === 31337;
-  if (!local && !env.DATABASE_URL) throw new Error("DATABASE_URL is required outside chain 31337 (usage ledger must persist)");
-  if (!local && env.DEPLOY_BLOCK === 0n) throw new Error("DEPLOY_BLOCK is required outside chain 31337");
-  if (!local && (!env.SESSION_SECRET || env.SESSION_SECRET.length < 32)) throw new Error("SESSION_SECRET (32+ chars) is required outside chain 31337");
+  if (env.CHAIN_ID !== 31337 && env.DEPLOY_BLOCK === 0n) throw new Error("DEPLOY_BLOCK is required outside chain 31337");
 }

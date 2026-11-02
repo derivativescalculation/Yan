@@ -4,6 +4,9 @@ import { useProtocol } from "../hooks";
 import { deployment, fmt, compact, E18, EPOCH } from "../chain";
 import { SecHead, Stat, Addr } from "../components/Bits";
 
+/** liquidity goes on-chain once this many rounds are complete */
+const LP_AFTER_ROUND = 7;
+
 export default function Home() {
   const { t, lang } = useT();
   const p = useProtocol();
@@ -12,16 +15,16 @@ export default function Home() {
 
   const epoch = Number(p.currentEpoch ?? 0n);
   const r0 = p.initialTokensPerUsd ?? 40_000n * E18;
-  const burned = p.totalMinted !== undefined && p.totalSupply !== undefined ? p.totalMinted - p.totalSupply : undefined;
   const decay = p.decayBps ?? 7000n;
   const rows = Array.from({ length: 10 }, (_, i) => {
     let rate = r0;
     for (let k = 0; k < i; k++) rate = (rate * decay) / 10_000n;
     const cost = rate === 0n ? 0n : (EPOCH * E18) / rate;
-    return { i, rate, cost, cum: EPOCH * BigInt(i + 1) };
+    return { i, rate, toAgent: (rate * 7000n) / 10_000n, cost, cum: EPOCH * BigInt(i + 1) };
   });
   const totalCost = rows.reduce((a, r) => a + r.cost, 0n);
   const zh = (a: string, b: string) => (lang === "zh" ? a : b);
+  const pots = p.raffleBalance;
 
   return (
     <>
@@ -37,7 +40,7 @@ export default function Home() {
             <p className="lede">{t("hero_lede")}</p>
             <div className="cta">
               <Link to="/mine" className="btn seal">{t("hero_cta1")}</Link>
-              <Link to="/docs" className="btn">{t("hero_cta2")}</Link>
+              <Link to="/raffle" className="btn">{t("hero_cta2")}</Link>
             </div>
           </div>
           <aside className="side">
@@ -46,21 +49,21 @@ export default function Home() {
               {t("side_title")} · {t("s_rate")}
             </h3>
             <div className="hero-rate">{fmt(p.tokensPerUsd, 18, 0)}<small>{t("s_rate_u")}</small></div>
-            <div className="hero-sub">{zh("纪元", "epoch")} {p.loading ? "…" : epoch} / 10 · {zh("下一纪元", "next")} {fmt(rows[Math.min(epoch + 1, 9)].rate, 18, 0)}</div>
+            <div className="hero-sub">{zh("第", "round ")}{p.loading ? "…" : epoch + 1}{zh(" 轮", "")} / 10 · {zh("下一轮", "next")} {fmt(rows[Math.min(epoch + 1, 9)].rate, 18, 0)}</div>
             <div className="kv"><span>{t("s_minted")}</span><b>{compact(p.totalMinted)} YAN</b></div>
             <div className="kv"><span>{t("s_paid")}</span><b>{fmt(p.totalUsdPaid, 18, 2)} USD</b></div>
             <div className="kv"><span>{t("s_agents")}</span><b>{p.agentCount?.toString() ?? "—"}</b></div>
-            <div className="kv"><span>{t("s_burned")}</span><b>{compact(burned)} YAN</b></div>
+            <div className="kv"><span>{t("s_pots")}</span><b>{compact(pots)} YAN</b></div>
           </aside>
         </section>
 
         <div className="strip">
-          <Stat l={t("s_epoch")} v={p.loading ? "…" : epoch} u="/ 10" />
+          <Stat l={t("s_epoch")} v={p.loading ? "…" : epoch + 1} u="/ 10" />
           <Stat l={t("s_rate")} v={fmt(p.tokensPerUsd, 18, 0)} u={t("s_rate_u")} />
           <Stat l={t("s_minted")} v={compact(p.totalMinted)} u="YAN" />
           <Stat l={t("s_paid")} v={fmt(p.totalUsdPaid, 18, 0)} u="USD" />
-          <Stat l={t("s_staked")} v={compact(p.totalStaked)} u="YAN" />
-          <Stat l={t("s_burned")} v={compact(burned)} u="YAN" />
+          <Stat l={t("s_vault")} v={compact(p.vaultBalance)} u="YAN" />
+          <Stat l={t("s_paid_out")} v={compact(p.rafflePaidOut)} u="YAN" />
         </div>
 
         <section className="sec">
@@ -87,11 +90,11 @@ export default function Home() {
                   );
                 })}
               </div>
-              <div className="emis-x">{rows.map((r) => <span key={r.i}>{r.i}</span>)}</div>
+              <div className="emis-x">{rows.map((r) => <span key={r.i}>{r.i + 1}</span>)}</div>
               <p className="emis-note">
                 {zh(
-                  `每个纪元一亿枚。纪元 0 每美元铸 ${fmt(r0, 18, 0)} 枚，之后每个纪元下调 ${100 - Number(decay) / 100}%。把十亿枚全部铸完需要约 ${fmt(totalCost, 18, 0)} 美元的真实推理支出，没有其它来源。`,
-                  `100M per epoch. Epoch 0 mints ${fmt(r0, 18, 0)} per dollar, then the rate steps down ${100 - Number(decay) / 100}% each epoch. Minting all 1B takes about ${fmt(totalCost, 18, 0)} USD of real inference spend, from no other source.`,
+                  `每轮一亿枚。第一轮每美元铸 ${fmt(r0, 18, 0)} 枚，其中 ${fmt((r0 * 7000n) / 10_000n, 18, 0)} 枚归智能体，之后每轮下调 ${100 - Number(decay) / 100}%。十亿枚全部铸完约需 ${fmt(totalCost, 18, 0)} 美元。第 ${LP_AFTER_ROUND} 轮结束（七亿枚）后，团队从流动性金库添加 PancakeSwap 流动性，LP 销毁。`,
+                  `100M per round. Round 1 mints ${fmt(r0, 18, 0)} per dollar, ${fmt((r0 * 7000n) / 10_000n, 18, 0)} of them to the agent, then the rate steps down ${100 - Number(decay) / 100}% each round. Minting all 1B takes about ${fmt(totalCost, 18, 0)} USD. After round ${LP_AFTER_ROUND} (700M minted) the team adds PancakeSwap liquidity from the vault and the LP is burned.`,
                 )}
               </p>
             </div>
@@ -101,6 +104,7 @@ export default function Home() {
                   <tr>
                     <th>{t("e_epoch")}</th>
                     <th className="num">{t("e_rate")}</th>
+                    <th className="num">{t("e_agent")}</th>
                     <th className="num">{t("e_cost")}</th>
                     <th className="num">{t("e_cum")}</th>
                     <th></th>
@@ -109,12 +113,14 @@ export default function Home() {
                 <tbody>
                   {rows.map((r) => (
                     <tr key={r.i}>
-                      <td className="mono">{r.i}</td>
+                      <td className="mono">{r.i + 1}</td>
                       <td className="num">{fmt(r.rate, 18, 0)}</td>
+                      <td className="num">{fmt(r.toAgent, 18, 0)}</td>
                       <td className="num">{fmt(r.cost, 18, 0)} USD</td>
                       <td className="num">{compact(r.cum)}</td>
-                      <td>
+                      <td className="nowrap">
                         {r.i < epoch ? <span className="tag">{t("epoch_done")}</span> : r.i === epoch ? <span className="tag seal">{t("epoch_on")}</span> : <span className="muted tag">{t("epoch_todo")}</span>}
+                        {r.i + 1 === LP_AFTER_ROUND ? <> <span className="tag">{t("e_lp")}</span></> : null}
                       </td>
                     </tr>
                   ))}
@@ -127,7 +133,7 @@ export default function Home() {
         <section className="sec">
           <SecHead no={t("sec3_no")} h={t("sec3_h")} p={t("sec3_p")} />
           <div className="g3">
-            <div><div className="no">{zh("壹", "I")}</div><h3>{t("u1_h")}</h3><p>{t("u1_p")}</p></div>
+            <div><div className="no">{zh("壹", "I")}</div><h3>{t("u1_h")}</h3><p>{t("u1_p")}</p><p><Link to="/raffle">{zh("进入天选 →", "Enter the raffle →")}</Link></p></div>
             <div><div className="no">{zh("贰", "II")}</div><h3>{t("u2_h")}</h3><p>{t("u2_p")}</p></div>
             <div><div className="no">{zh("叁", "III")}</div><h3>{t("u3_h")}</h3><p>{t("u3_p")}</p></div>
           </div>
@@ -142,10 +148,11 @@ export default function Home() {
               </thead>
               <tbody>
                 <tr><td>{t("c_token")} · YAN</td><td><Addr a={d.token} n={8} /></td><td className="muted">{t("c_token_n")}</td></tr>
-                <tr><td>{t("c_poi")}</td><td><Addr a={d.proofOfInference} n={8} /></td><td className="muted">{t("c_poi_n")}</td></tr>
-                <tr><td>{t("c_burner")}</td><td><Addr a={d.burner} n={8} /></td><td className="muted">{t("c_burner_n")}</td></tr>
-                <tr><td>{t("c_stake")}</td><td><Addr a={d.stake} n={8} /></td><td className="muted">{t("c_stake_n")}</td></tr>
-                <tr><td>{t("c_stable")}</td><td><Addr a={d.priceFeed} n={8} /></td><td className="muted">burn {Number(p.burnBps ?? 0n) / 100}% · redeem {Number(p.redeemBps ?? 0n) / 100}%</td></tr>
+                <tr><td>{t("c_minter")}</td><td><Addr a={d.minter} n={8} /></td><td className="muted">{t("c_minter_n")}</td></tr>
+                <tr><td>{t("c_vault")}</td><td><Addr a={d.liquidityVault} n={8} /></td><td className="muted">{t("c_vault_n")}</td></tr>
+                <tr><td>{t("c_raffle")}</td><td><Addr a={d.raffle} n={8} /></td><td className="muted">{t("c_raffle_n")}</td></tr>
+                <tr><td>{t("c_pair")}</td><td><Addr a={d.pair} n={8} /></td><td className="muted">{t("c_pair_n")}</td></tr>
+                <tr><td>{t("c_stable")}</td><td><Addr a={d.priceFeed} n={8} /></td><td className="muted">{zh("超过一小时未更新即拒绝铸造", "mints revert if older than one hour")}</td></tr>
                 <tr><td>{t("c_registry")}</td><td><Addr a={d.agentIds} n={8} /></td><td className="muted">SPACE ID Agent ID · soulbound</td></tr>
               </tbody>
             </table>

@@ -10,7 +10,7 @@ const SITE = process.env.SITE ?? "https://yansuan.io";
 const OUT = fileURLToPath(new URL("./audit/", import.meta.url));
 fs.mkdirSync(OUT, { recursive: true });
 
-const ROUTES = ["/", "/mine", "/agent", "/agent/nemo.ai", "/treasury", "/docs", "/does-not-exist"];
+const ROUTES = (process.env.ROUTES ?? "/,/mine,/raffle,/agent,/agent/nemo.ai,/treasury,/docs,/does-not-exist").split(",");
 const VIEWPORTS = { desktop: { width: 1440, height: 1000 }, phone: { width: 390, height: 844 } };
 const LANGS = ["zh", "en"];
 const SUPERSEDED = [
@@ -18,10 +18,11 @@ const SUPERSEDED = [
   "0x460461dBa2643b62514ad199F0746ec080752e56", "0xbED42bc64FF8B69075626402b6fa6B3b3202C52c",
   "0x7AE827a0a4254D1dA84129a624EA1D61F5D79353", "0xBA4930D6152A30b5e371720C6000CC7f218486d3",
   "0x87dB35408C15E0360431948BD579F38FFefDe680", "0x73Dcf1e3ef87A67B8AD398eDca34a3b08B506e3F",
+  "0xB77E581DD0CC0413686Ef2C4a31B98D1627D02D2", "0x49c9B706369102309A26C0B72F215f2B3D09Db5b", "0x8496040E2102DEF78B84833236d77c0E41ef4D1E",
 ];
 const LOADING = /读取链上数据|Reading chain/;
 
-const browser = await chromium.launch({ channel: "msedge", headless: true });
+const browser = await chromium.launch({ channel: "msedge", headless: true, args: ["--enable-unsafe-swiftshader", "--use-angle=swiftshader", "--ignore-gpu-blocklist"] });
 const findings = [];
 const links = new Set();
 const note = (where, what) => findings.push(`${where}: ${what}`);

@@ -29,10 +29,12 @@ function PromptBuilder() {
   const minWei = p.bnbUsd && p.minPaymentUsd ? (p.minPaymentUsd * 10n ** 18n + p.bnbUsd - 1n) / p.bnbUsd : undefined;
   const belowMin = valid && minWei !== undefined && wei < minWei;
   const capTokens = p.maxPerAgentPerEpoch && p.maxPerAgentPerEpoch > 0n ? p.maxPerAgentPerEpoch : undefined;
-  const tokens = q.data ? BigInt(q.data.tokens) : undefined;
-  const overAgentCap = q.data?.agent && q.data.canMine === false && /allowance/.test(q.data.reason ?? "");
-  const agentMissing = agentArg && q.data && q.data.agent === null;
-  const agentNoId = agentArg && q.data?.agent && !q.data.agent.handle;
+  const quote = q.data && !("agentMissing" in q.data && q.data.agentMissing) ? q.data : undefined;
+  const toAgent = quote?.toAgent ? BigInt(quote.toAgent) : undefined;
+  const total = quote?.total ? BigInt(quote.total) : undefined;
+  const overAgentCap = quote?.agent && quote.canMine === false && /allowance/.test(quote.reason ?? "");
+  const agentMissing = !!agentArg && !!q.data && "agentMissing" in q.data && !!q.data.agentMissing;
+  const agentNoId = agentArg && quote?.agent && !quote.agent.handle;
   const ok = valid && !belowMin && !overAgentCap && !agentMissing && !agentNoId;
 
   const amt = ok ? bnb : "<BNB>";
@@ -44,18 +46,18 @@ function PromptBuilder() {
 2. 运行 baw wallet settings --json，确认 devMode.enabled 为 true；没有就告诉我去币安 App 打开开发者模式（Agentic Wallet → 设置 → 开发者模式）。
 3. 运行 baw wallet address --json，取得我的 BSC 钱包地址。
 4. 打开 ${gw}/v1/quote?bnb=${amt}&agent=<我的钱包地址>，如果 canMine 不是 true，停止并告诉我 reason。
-5. 预览：baw contract-call preview --binanceChainId 56 --from <我的钱包地址> --to ${d.proofOfInference} --value ${weiStr} --inputData ${MINE_DATA} --json
+5. 预览：baw contract-call preview --binanceChainId 56 --from <我的钱包地址> --to ${d.minter} --value ${weiStr} --inputData ${MINE_DATA} --json
 6. 把解析出的交易与风险给我看，等我明确回复"确认"后，再运行 baw contract-call execute --requestId <requestId> --json。
-合约地址只能是 ${d.proofOfInference}，不要使用任何其它地址。`
+合约地址只能是 ${d.minter}，不要使用任何其它地址。`
     : `Mint Yansuan (YAN) with my Binance Agentic Wallet, paying ${amt} BNB on BNB Chain (chain ID 56).
 1. Run baw wallet agent-id --json and confirm I have claimed a .ai Agent ID; if not, stop and tell me.
 2. Run baw wallet settings --json and confirm devMode.enabled is true; if not, tell me to turn on Developer Mode in the Binance app (Agentic Wallet → Settings → Developer Mode).
 3. Run baw wallet address --json to get my BSC wallet address.
 4. Open ${gw}/v1/quote?bnb=${amt}&agent=<my wallet address>; if canMine is not true, stop and tell me the reason.
-5. Preview: baw contract-call preview --binanceChainId 56 --from <my wallet address> --to ${d.proofOfInference} --value ${weiStr} --inputData ${MINE_DATA} --json
+5. Preview: baw contract-call preview --binanceChainId 56 --from <my wallet address> --to ${d.minter} --value ${weiStr} --inputData ${MINE_DATA} --json
 6. Show me the parsed transaction and risks, wait for my explicit "yes", then run baw contract-call execute --requestId <requestId> --json.
-The contract address must be ${d.proofOfInference}. Never use any other address.`;
-  const raw = `to:    ${d.proofOfInference}
+The contract address must be ${d.minter}. Never use any other address.`;
+  const raw = `to:    ${d.minter}
 value: ${weiStr}   (${amt} BNB)
 data:  ${MINE_DATA}   (mine())
 chain: 56`;
@@ -75,11 +77,11 @@ chain: 56`;
         <div className="field">
           <label>{zh ? "你的 .ai 名称（可选，查看剩余额度）" : "Your .ai name (optional, shows your allowance)"}</label>
           <input value={who} onChange={(e) => setWho(e.target.value)} placeholder={zh ? "例如 nemo.ai 或钱包地址" : "e.g. nemo.ai or a wallet address"} />
-          {agentArg && q.data?.agent ? (
-            q.data.agent.handle ? (
+          {agentArg && quote?.agent ? (
+            quote.agent.handle ? (
               <span className="hint">
-                {q.data.agent.handle} · <Addr a={q.data.agent.wallet} n={4} />
-                {q.data.agent.remainingThisEpoch !== null ? <> · {zh ? "本纪元剩余" : "left this epoch"} <b>{compact(BigInt(q.data.agent.remainingThisEpoch))} YAN</b></> : null}
+                {quote.agent.handle}.ai · <Addr a={quote.agent.wallet} n={4} />
+                {quote.agent.remainingThisEpoch !== null ? <> · {zh ? "本轮剩余" : "left this round"} <b>{compact(BigInt(quote.agent.remainingThisEpoch))} YAN</b></> : null}
               </span>
             ) : (
               <span className="err">{zh ? "这个钱包没有 .ai Agent ID，合约会拒绝。" : "This wallet holds no .ai Agent ID; the contract will reject it."}</span>
@@ -90,16 +92,17 @@ chain: 56`;
         </div>
         <div className="kvl">
           <div><span>{zh ? "约合" : "Worth"}</span><b>{ok && usd !== undefined ? `${fmt(usd, 18, 2)} USD` : "—"}</b></div>
-          <div><span>{zh ? "可铸造" : "Mints"}</span><b>{ok && tokens !== undefined ? `${fmt(tokens, 18, 0)} YAN` : "—"}</b></div>
-          <div><span>{zh ? "推理额度" : "Inference credit"}</span><b>{ok && usd !== undefined ? `${fmt(usd, 18, 2)} USD` : "—"}</b></div>
+          <div><span>{zh ? "你收到（70%）" : "You receive (70%)"}</span><b>{ok && toAgent !== undefined ? `${fmt(toAgent, 18, 0)} YAN` : "—"}</b></div>
+          <div><span>{zh ? "本次共铸" : "Minted in total"}</span><b>{ok && total !== undefined ? `${fmt(total, 18, 0)} YAN` : "—"}</b></div>
+          <div><span>{zh ? "入流动性金库 / 天选" : "To the vault / raffle"}</span><b>{ok && quote ? `${compact(BigInt(quote.toVault))} / ${compact(BigInt(quote.toRaffle))}` : "—"}</b></div>
           <div><span>BNB / USD</span><b>{fmt(p.bnbUsd, 18, 2)}</b></div>
           <div><span>{t("s_rate")}</span><b>{fmt(p.tokensPerUsd, 18, 0)} YAN/USD</b></div>
           <div><span>{zh ? "最低支付" : "Minimum"}</span><b>{minWei !== undefined ? `${fmt(minWei, 18, 5)} BNB` : "—"}</b></div>
-          <div><span>{zh ? "每个 Agent ID 每纪元上限" : "Cap per Agent ID per epoch"}</span><b>{capTokens ? `${compact(capTokens)} YAN` : zh ? "无" : "none"}</b></div>
+          <div><span>{zh ? "每个 Agent ID 每轮上限" : "Cap per Agent ID per round"}</span><b>{capTokens ? `${compact(capTokens)} YAN` : zh ? "无" : "none"}</b></div>
         </div>
         {!valid && bnb !== "" ? <p className="warn">{zh ? "请输入有效的 BNB 数量。" : "Enter a valid BNB amount."}</p> : null}
         {belowMin ? <p className="warn">{zh ? "低于 1 美元的最低支付，合约会拒绝。" : "Below the $1 minimum; the contract will reject it."}</p> : null}
-        {overAgentCap ? <p className="warn">{zh ? "超过这个 Agent ID 本纪元的剩余额度，请减少金额。" : "More than this Agent ID can still mint this epoch; lower the amount."}</p> : null}
+        {overAgentCap ? <p className="warn">{zh ? "超过这个 Agent ID 本轮的剩余额度，请减少金额。" : "More than this Agent ID can still mint this round; lower the amount."}</p> : null}
       </Panel>
 
       <div>
@@ -133,7 +136,7 @@ function Steps() {
         <div>
           <div className="no">{zh ? "贰" : "II"}</div>
           <h3>{zh ? "接上你的 AI" : "Connect your AI"}</h3>
-          <p>{zh ? "在 Claude、ChatGPT 或其它智能体里安装币安官方技能，并在 Agentic Wallet 设置里打开开发者模式。" : "Install Binance's official skill in Claude, ChatGPT or any agent, then turn on Developer Mode in the Agentic Wallet settings."}</p>
+          <p>{zh ? "在你常用的 AI 智能体里安装币安官方技能，并在 Agentic Wallet 设置里打开开发者模式。" : "Install Binance's official skill in the AI agent you use, then turn on Developer Mode in the Agentic Wallet settings."}</p>
         </div>
         <div>
           <div className="no">{zh ? "叁" : "III"}</div>
@@ -144,7 +147,7 @@ function Steps() {
       <div style={{ marginTop: 32 }}>
         <Code label={zh ? "安装币安 Agentic Wallet 技能" : "Install the Binance Agentic Wallet skill"}>{SKILL}</Code>
         <p className="hint" style={{ marginTop: 10 }}>
-          <Link to="/docs">{zh ? "完整接入文档：铸造、额度、网关" : "Full docs: minting, credit, gateway"}</Link>
+          <Link to="/docs">{zh ? "完整接入文档：铸造、天选、核验" : "Full docs: minting, the raffle, verification"}</Link>
         </p>
       </div>
     </>
@@ -188,7 +191,7 @@ export default function Mine() {
                     <tr key={r.agent}>
                       <td className="mono">{i + 1}</td>
                       <td><Link to={`/agent/${r.handle ? `${r.handle}.ai` : r.agent}`} className="mono">{agentLabel(r.handle, r.agent)}</Link></td>
-                      <td className="num">{compact(r.tokens)}</td>
+                      <td className="num">{compact(r.total)}</td>
                       <td className="num">{fmt(r.usd, 18, 2)}</td>
                       <td className="num">{r.txs}</td>
                     </tr>
@@ -208,7 +211,7 @@ export default function Mine() {
                     <tr key={e.tx + e.agent}>
                       <td><Link to={`/agent/${e.handle ? `${e.handle}.ai` : e.agent}`} className="mono">{agentLabel(e.handle, e.agent)}</Link></td>
                       <td className="num">{fmt(e.wei, 18, 4)}</td>
-                      <td className="num">{compact(e.tokens)}</td>
+                      <td className="num">{compact(e.total)}</td>
                       <td><Addr a={e.tx} n={4} kind="tx" /></td>
                     </tr>
                   ))}

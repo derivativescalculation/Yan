@@ -6,13 +6,11 @@
   "scripts": {
     "dev": "bun --watch src/server.ts",
     "start": "bun src/server.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "bun test"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "latest",
-    "@modelcontextprotocol/sdk": "latest",
     "hono": "latest",
-    "postgres": "latest",
     "viem": "latest",
     "zod": "latest"
   },

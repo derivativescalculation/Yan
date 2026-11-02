@@ -39,7 +39,7 @@ try {
 
   await page.locator(".field input").first().fill("0.01");
   await page.locator(".field input").nth(1).fill("nemo.ai");
-  await page.getByText(/本纪元剩余|left this epoch/).waitFor();
+  await page.getByText(/本轮剩余|left this round/).waitFor();
   step("nemo.ai -> handle, wallet and remaining allowance");
 
   await page.locator(".field input").nth(1).fill("thisnamedoesnotexist123.ai");

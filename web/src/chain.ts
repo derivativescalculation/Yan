@@ -1,22 +1,26 @@
 import { createConfig, http } from "wagmi";
 import { bsc, bscTestnet, foundry } from "wagmi/chains";
 import { parseAbi, type Address } from "viem";
-import PoiAbi from "./abi/ProofOfInference.json";
+import MinterAbi from "./abi/YanMinter.json";
 import TokenAbi from "./abi/SuanToken.json";
-import StakeAbi from "./abi/SuanStake.json";
-import BurnerAbi from "./abi/BuybackBurner.json";
+import RaffleAbi from "./abi/TianxuanRaffle.json";
+import VaultAbi from "./abi/LiquidityVault.json";
 
 export interface Deployment {
   chainId: number;
   token: Address;
-  proofOfInference: Address;
-  burner: Address;
-  stake: Address;
+  minter: Address;
+  liquidityVault: Address;
+  raffle: Address;
+  pair: Address;
   priceFeed: Address;
   agentIds: Address;
-  maxPerAgentPerEpoch?: string;
   router: Address;
-  opsTreasury: Address;
+  treasury: Address;
+  keeper: Address;
+  vrfCoordinator: Address;
+  vrfSubId: string;
+  maxPerAgentPerEpoch?: string;
 }
 
 const files = import.meta.glob("./deployments/*.json", { eager: true, import: "default" }) as Record<
@@ -41,10 +45,10 @@ export const wagmiConfig = createConfig({
   transports: { [chain.id]: http(RPC) } as any,
 });
 
-export const poiAbi = PoiAbi as any;
+export const minterAbi = MinterAbi as any;
 export const tokenAbi = TokenAbi as any;
-export const stakeAbi = StakeAbi as any;
-export const burnerAbi = BurnerAbi as any;
+export const raffleAbi = RaffleAbi as any;
+export const vaultAbi = VaultAbi as any;
 export const erc20Abi = parseAbi([
   "function balanceOf(address) view returns (uint256)",
   "function allowance(address owner, address spender) view returns (uint256)",

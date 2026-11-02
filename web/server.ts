@@ -1,5 +1,5 @@
 // Static server for the built site with SPA fallback. Used by the container image.
-const dist = new URL("./dist/", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1");
+const dist = decodeURIComponent(new URL("./dist/", import.meta.url).pathname).replace(/^\/([A-Za-z]:)/, "$1");
 const index = Bun.file(`${dist}/index.html`);
 const port = Number(process.env.PORT ?? 3000);
 Bun.serve({
