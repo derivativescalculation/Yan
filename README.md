@@ -159,7 +159,7 @@ The script precomputes the minter address, deploys token → burner → minter �
 
 All contracts are verified on BscScan. **The mainnet YAN token is `0x87dB35408C15E0360431948BD579F38FFefDe680`.** Any other token named Yansuan or YAN is not the protocol token.
 
-Superseded mainnet deployments (pre-launch iterations, not the protocol token):
+Superseded mainnet deployments (pre-launch iterations, not the protocol token). Mining is paused on all three minters; only the official minter above accepts payments:
 
 | Token | Minter | Note |
 |---|---|---|
